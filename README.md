@@ -37,6 +37,40 @@ I did not write the code yet. Here is the plan (not fully planned).
 ### Create a ZFS dataset
 You could use BTRFS or some other fs which can do snapshots, but for now it is made for ZFS.
 
+## Getting started
+### Create an AWS acccount
+
+### Create an AWS IAM user
+- Click "Create user"
+- In step 2 select "Attach policies directly"
+- Click the "Create policy" button
+- Click on "JSON"
+- Paste the following JSON:
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "VisualEditor0",
+            "Effect": "Allow",
+            "Action": "s3:*",
+            "Resource": "*"
+        }
+    ]
+}
+```
+- Continue creating the user (no other things to set)
+
+### Create an access key
+- Click on the user
+- Click "Create access key"
+- Select the "Local code" use case
+- Continue creating it
+
+## Save the access key
+- Get the AWS ClI
+- Run `aws configure` and enter the credentials and region. Leave "Default output format" empty
+
 ## Future Improvements
 Here are some improvements I can think of:
 - Being able to change the encryption password
