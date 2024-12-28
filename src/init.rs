@@ -1,9 +1,6 @@
 use std::fmt::Display;
 
-use aes_gcm::aead::Aead;
-use aes_gcm::{Aes256Gcm, Key, KeyInit, Nonce};
-use anyhow::anyhow;
-use argon2::password_hash::Salt;
+use aes_gcm::{Aes256Gcm, Key};
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::types::{BucketLocationConstraint, StorageClass};
 use rand::{thread_rng, Rng};
@@ -11,7 +8,7 @@ use rand::{thread_rng, Rng};
 use crate::backup_data::{BackupData, EncryptionData};
 use crate::config::ENCRYPTION_DATA_OBJECT_KEY;
 use crate::create_bucket::create_bucket;
-use crate::derive_key::derive_key;
+use crate::derive_key::{encrypt_immutable_key, generate_salt_and_derive_key};
 
 pub async fn init(
     s3_client: &aws_sdk_s3::Client,
@@ -35,21 +32,13 @@ pub async fn init(
                 };
                 // println!("Immutable key: {:?}", immutable_key);
                 // We will also create a key derived from the password, along with a random salt
-                let (password_derived_key_salt, password_derived_key) = {
-                    let salt = thread_rng().gen::<[u8; Salt::RECOMMENDED_LENGTH]>();
-                    let key = derive_key(&encryption_password, &salt)?;
-                    (salt, key)
-                };
+                let (password_derived_key_salt, password_derived_key) =
+                    generate_salt_and_derive_key(&encryption_password)?;
                 // println!("password_derived_key_salt: {:?}", password_derived_key_salt);
                 // println!("password_derived_key: {:?}", password_derived_key);
                 // We will then encrypt the encryption key itself using the password
-                let encrypted_immutable_key = {
-                    let cipher = Aes256Gcm::new(&password_derived_key);
-                    let nonce = Nonce::default();
-                    cipher
-                        .encrypt(&nonce, immutable_key.as_slice())
-                        .map_err(|e| anyhow!("Failed to encrypt: {e:?}"))?
-                };
+                let encrypted_immutable_key =
+                    encrypt_immutable_key(&password_derived_key, immutable_key.as_slice())?;
                 // println!("encrypted_immutable_key: {:?}", encrypted_immutable_key);
                 Ok(Some(EncryptionData {
                     password_derived_key_salt,

@@ -3,16 +3,21 @@ use std::path::PathBuf;
 
 use anyhow::{anyhow, Context};
 use aws_config::BehaviorVersion;
-use aws_sdk_s3::types::BucketLocationConstraint;
+use aws_sdk_s3::primitives::ByteStream;
+use aws_sdk_s3::types::{BucketLocationConstraint, StorageClass};
 use backup_data::{BackupState, EncryptionData};
-use check_key::check_key;
+use check_key::decrypt_immutable_key;
 use chrono::Utc;
 use clap::{Parser, Subcommand};
 use config::ENCRYPTION_DATA_OBJECT_KEY;
+use derive_key::{encrypt_immutable_key, generate_salt_and_derive_key};
 use diff_or_first::diff_or_first;
 use get_config::get_config;
 use get_data::{get_data, write_data};
 use init::init;
+use promptuity::prompts::Password;
+use promptuity::themes::MinimalTheme;
+use promptuity::{Promptuity, Term};
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
@@ -73,6 +78,14 @@ enum Commands {
         take_snapshot: bool,
     },
     CheckPassword {
+        /// Path to a JSON file with config
+        #[arg(short, long)]
+        config_path: PathBuf,
+        /// Path to the backup data JSON file
+        #[arg(short, long)]
+        data_path: PathBuf,
+    },
+    ChangePassword {
         /// Path to a JSON file with config
         #[arg(short, long)]
         config_path: PathBuf,
@@ -177,7 +190,7 @@ async fn main() -> anyhow::Result<()> {
                     let encryption_password = encryption_password.get_bytes().await?;
 
                     let check_local = || {
-                        check_key(
+                        decrypt_immutable_key(
                             &encryption_password,
                             &data.encryption.ok_or(anyhow!("No salt in data"))?,
                         )?;
@@ -198,7 +211,7 @@ async fn main() -> anyhow::Result<()> {
                         let s3_encryption_data = postcard::from_bytes::<EncryptionData>(
                             &s3_encryption_data.into_bytes(),
                         )?;
-                        check_key(&encryption_password, &s3_encryption_data)?;
+                        decrypt_immutable_key(&encryption_password, &s3_encryption_data)?;
                         anyhow::Ok("The password worked on the remote backup data")
                     };
 
@@ -215,6 +228,79 @@ async fn main() -> anyhow::Result<()> {
                 }
                 None => {
                     Err(anyhow!("Not encrypted"))?;
+                }
+            }
+        }
+        Commands::ChangePassword {
+            config_path,
+            data_path,
+        } => {
+            let config = get_config(config_path).await?;
+            let mut data = get_data(&data_path).await?;
+            match config.encryption_password {
+                Some(encryption_password) => {
+                    let encryption_password = encryption_password.get_bytes().await?;
+                    let sdk_config = aws_config::defaults(BehaviorVersion::latest()).load().await;
+                    let s3_client = aws_sdk_s3::Client::new(&sdk_config);
+                    let output = s3_client
+                        .get_object()
+                        .bucket(&data.s3_bucket)
+                        .key(ENCRYPTION_DATA_OBJECT_KEY)
+                        .send()
+                        .await?;
+                    let s3_encryption_data = output.body.collect().await?;
+                    let s3_encryption_data =
+                        postcard::from_bytes::<EncryptionData>(&s3_encryption_data.into_bytes())?;
+                    let decrypted_immutable_key =
+                        decrypt_immutable_key(&encryption_password, &s3_encryption_data)?;
+
+                    let mut term = Term::default();
+                    let mut theme = MinimalTheme::default();
+                    let mut p = Promptuity::new(&mut term, &mut theme);
+
+                    let new_password = {
+                        p.begin()?;
+                        let password = loop {
+                            let password =
+                            p.prompt(Password::new("Set a new encryption password").with_hint(
+                                "If you need an alternate method other than stdin, open an issue",
+                            ))?;
+                            let password_repeated = p.prompt(
+                                Password::new("Re-enter the new encryption password").as_mut(),
+                            )?;
+                            if password_repeated == password {
+                                break password;
+                            }
+                            p.error("Repeated password was not the same")?;
+                        };
+                        p.finish()?;
+                        password
+                    };
+                    let (new_salt, new_derived_key) =
+                        generate_salt_and_derive_key(new_password.as_bytes())?;
+                    let encrypted_immutable_key =
+                        encrypt_immutable_key(&new_derived_key, &decrypted_immutable_key)?;
+                    let new_encryption_data = EncryptionData {
+                        password_derived_key_salt: new_salt,
+                        encrypted_immutable_key,
+                    };
+                    s3_client
+                        .put_object()
+                        .bucket(&data.s3_bucket)
+                        .key(ENCRYPTION_DATA_OBJECT_KEY)
+                        .body(ByteStream::from(postcard::to_allocvec(
+                            &new_encryption_data,
+                        )?))
+                        .storage_class(StorageClass::Standard)
+                        .send()
+                        .await?;
+                    data.encryption = Some(new_encryption_data);
+                    write_data(data_path, &data).await?;
+
+                    println!("Changed encryption password. Make sure to update your config to use the new password because the previous password will not work. You can use `check-password` to check it.");
+                }
+                None => {
+                    Err(anyhow!("Not encrypted! There is no way to encrypt the unencrypted backups. You will have to create a new encrypted backup and delete the old one."))?;
                 }
             }
         }

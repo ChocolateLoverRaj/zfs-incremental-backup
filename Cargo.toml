@@ -18,6 +18,7 @@ futures = "0.3.31"
 hex = "0.4.3"
 postcard = { version = "1.1.1", features = ["use-std"] }
 proc-mounts = "0.3.0"
+promptuity = "0.0.5"
 rand = "0.8.5"
 serde = { version = "1.0.216", features = ["derive"] }
 serde_json = "1.0.134"
