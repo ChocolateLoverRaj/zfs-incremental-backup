@@ -1,108 +1,36 @@
-use std::fmt::Display;
 use std::io::ErrorKind;
 use std::path::PathBuf;
 
-use aes_gcm::aead::Aead;
-use aes_gcm::{Aes256Gcm, Key, KeyInit, Nonce};
-use anyhow::anyhow;
-use argon2::password_hash::Salt;
-use argon2::Argon2;
+use anyhow::{anyhow, Context};
 use aws_config::BehaviorVersion;
-use aws_sdk_s3::primitives::ByteStream;
-use aws_sdk_s3::types::{BucketLocationConstraint, StorageClass};
+use aws_sdk_s3::types::BucketLocationConstraint;
+use backup_data::{BackupState, EncryptionData};
+use check_key::check_key;
+use chrono::Utc;
 use clap::{Parser, Subcommand};
-use create_bucket::create_bucket;
-use encryption_password::EncryptionPassword;
-use rand::{thread_rng, Rng};
-use serde::{Deserialize, Serialize};
-use tokio::fs::{read_to_string, OpenOptions};
+use config::ENCRYPTION_DATA_OBJECT_KEY;
+use diff_or_first::diff_or_first;
+use get_config::get_config;
+use get_data::{get_data, write_data};
+use init::init;
+use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
+use tokio::process::Command;
 
+mod backup_config;
+mod backup_data;
+mod check_key;
+mod config;
 mod create_bucket;
+mod derive_key;
+mod diff_or_first;
 mod encryption_password;
-
-#[derive(Debug, Serialize, Deserialize)]
-struct EncryptionData {
-    password_derived_key_salt: [u8; Salt::RECOMMENDED_LENGTH],
-    encrypted_immutable_key: Vec<u8>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct BackupData {
-    s3_bucket: String,
-    encryption: Option<EncryptionData>,
-}
-
-async fn init(
-    s3_client: &aws_sdk_s3::Client,
-    bucket_prefix: &impl Display,
-    location: &BucketLocationConstraint,
-    encryption_password: &Option<Vec<u8>>,
-) -> anyhow::Result<BackupData> {
-    let bucket = create_bucket(s3_client, bucket_prefix, location).await?;
-
-    let encryption_data =
-        encryption_password
-            .as_ref()
-            .map_or(anyhow::Ok(None), |encryption_password| {
-                // println!("Encryption password: {:?}", encryption_password);
-
-                // We will create an encryption key randomly
-                let immutable_key = {
-                    let mut immutable_key = Key::<Aes256Gcm>::default();
-                    thread_rng().fill(immutable_key.as_mut_slice());
-                    immutable_key
-                };
-                // println!("Immutable key: {:?}", immutable_key);
-                // We will also create a key derived from the password, along with a random salt
-                let (password_derived_key_salt, password_derived_key) = {
-                    let mut key = Key::<Aes256Gcm>::default();
-                    let salt = thread_rng().gen::<[u8; Salt::RECOMMENDED_LENGTH]>();
-                    Argon2::default()
-                        .hash_password_into(&encryption_password, &salt, key.as_mut_slice())
-                        .map_err(|e| anyhow!("Failed to create key: {e:?}"))?;
-                    (salt, key)
-                };
-                // println!("password_derived_key_salt: {:?}", password_derived_key_salt);
-                // println!("password_derived_key: {:?}", password_derived_key);
-                // We will then encrypt the encryption key itself using the password
-                let encrypted_immutable_key = {
-                    let cipher = Aes256Gcm::new(&password_derived_key);
-                    let nonce = Nonce::default();
-                    cipher
-                        .encrypt(&nonce, immutable_key.as_slice())
-                        .map_err(|e| anyhow!("Failed to encrypt: {e:?}"))?
-                };
-                // println!("encrypted_immutable_key: {:?}", encrypted_immutable_key);
-                Ok(Some(EncryptionData {
-                    password_derived_key_salt,
-                    encrypted_immutable_key,
-                }))
-            })?;
-
-    if let Some(encryption_data) = &encryption_data {
-        s3_client
-            .put_object()
-            .bucket(&bucket)
-            .key("encryption_data")
-            .body(ByteStream::from(postcard::to_allocvec(encryption_data)?))
-            .storage_class(StorageClass::Standard)
-            .send()
-            .await?;
-    }
-
-    Ok(BackupData {
-        s3_bucket: bucket,
-        encryption: encryption_data,
-    })
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct BackupConfig {
-    /// You can change the encryption password later, but you can't change from Some to None or None to Some.
-    /// You can set the encryption password to an empty string to be able to set a password later.
-    encryption_password: Option<EncryptionPassword>,
-}
+mod get_config;
+mod get_data;
+mod init;
+mod read_dir_recursive;
+mod serde_file;
+mod zfs_mount_get;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -137,6 +65,20 @@ enum Commands {
         /// Path to the backup data JSON file
         #[arg(short, long)]
         data_path: PathBuf,
+        /// Snapshot name (or id, if it already exists)
+        #[arg(short, long)]
+        snapshot_name: Option<String>,
+        /// If this is `true`, a snapshot will be taken with the name
+        #[arg(short, long)]
+        take_snapshot: bool,
+    },
+    CheckPassword {
+        /// Path to a JSON file with config
+        #[arg(short, long)]
+        config_path: PathBuf,
+        /// Path to the backup data JSON file
+        #[arg(short, long)]
+        data_path: PathBuf,
     },
 }
 
@@ -155,6 +97,7 @@ async fn main() -> anyhow::Result<()> {
                 .read(false)
                 .write(true)
                 .create(true)
+                .truncate(true)
                 .create_new(!force)
                 .open(data_path)
                 .await
@@ -163,11 +106,7 @@ async fn main() -> anyhow::Result<()> {
                         .context("Backup data file already exists. Use -f to overwrite."),
                     _ => e.into(),
                 })?;
-            let config = {
-                let config = read_to_string(config_path).await?;
-                let config = serde_json::from_str::<BackupConfig>(&config)?;
-                config
-            };
+            let config = get_config(config_path).await?;
             let sdk_config = aws_config::defaults(BehaviorVersion::latest()).load().await;
             let s3_client = aws_sdk_s3::Client::new(&sdk_config);
             let backup_data = init(
@@ -188,7 +127,97 @@ async fn main() -> anyhow::Result<()> {
         Commands::Backup {
             config_path,
             data_path,
-        } => {}
+            snapshot_name,
+            take_snapshot,
+        } => {
+            let config = get_config(config_path).await?;
+            let mut data = get_data(&data_path).await?;
+            if data.backup_state.is_some() {
+                Err(anyhow!("Previous backup in progress!"))?;
+            };
+            let snapshot_name = if take_snapshot {
+                // Don't backup more than once a second please. It won't work.
+                let snapshot_name = snapshot_name
+                    .unwrap_or(format!("backup-{}", Utc::now().format("%Y-%m-%d_%H-%M-%S")));
+                println!("Snapshot name: {snapshot_name:?}");
+                let output = Command::new("zfs")
+                    .arg("snapshot")
+                    .arg(format!("{}@{}", config.zfs_dataset_name, snapshot_name))
+                    .output()
+                    .await?;
+                if !output.status.success() {
+                    Err(anyhow!("ZFS command failed: {output:#?}"))?;
+                }
+                println!("Took snapshot");
+                snapshot_name
+            } else {
+                snapshot_name.ok_or(anyhow!(
+                    "Must specify a snapshot name, or use --take-snapshot"
+                ))?
+            };
+            println!("Diffing...");
+            let diff = diff_or_first(
+                config.zfs_dataset_name,
+                data.last_saved_snapshot_name.as_deref(),
+                snapshot_name,
+            )
+            .await?;
+            println!("Diff: {diff:#?}");
+            data.backup_state = Some(BackupState { diff });
+            write_data(data_path, &data).await?;
+        }
+        Commands::CheckPassword {
+            config_path,
+            data_path,
+        } => {
+            let config = get_config(config_path).await?;
+            let data = get_data(data_path).await?;
+            match config.encryption_password {
+                Some(encryption_password) => {
+                    let encryption_password = encryption_password.get_bytes().await?;
+
+                    let check_local = || {
+                        check_key(
+                            &encryption_password,
+                            &data.encryption.ok_or(anyhow!("No salt in data"))?,
+                        )?;
+                        anyhow::Ok("The password worked on the local backup data")
+                    };
+
+                    let check_remote = || async {
+                        let sdk_config =
+                            aws_config::defaults(BehaviorVersion::latest()).load().await;
+                        let s3_client = aws_sdk_s3::Client::new(&sdk_config);
+                        let output = s3_client
+                            .get_object()
+                            .bucket(data.s3_bucket)
+                            .key(ENCRYPTION_DATA_OBJECT_KEY)
+                            .send()
+                            .await?;
+                        let s3_encryption_data = output.body.collect().await?;
+                        let s3_encryption_data = postcard::from_bytes::<EncryptionData>(
+                            &s3_encryption_data.into_bytes(),
+                        )?;
+                        check_key(&encryption_password, &s3_encryption_data)?;
+                        anyhow::Ok("The password worked on the remote backup data")
+                    };
+
+                    let results = [
+                        check_local().context("The password did not work on local data"),
+                        check_remote()
+                            .await
+                            .context("The password did not work on remote data"),
+                    ]
+                    .into_iter()
+                    .collect::<Vec<_>>();
+                    println!("{:#?}", results);
+                    results.into_iter().collect::<Result<Vec<_>, _>>()?;
+                }
+                None => {
+                    Err(anyhow!("Not encrypted"))?;
+                }
+            }
+        }
     }
     Ok(())
 }
