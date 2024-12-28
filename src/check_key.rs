@@ -1,7 +1,7 @@
 use aes_gcm::{aead::Aead, Aes256Gcm, KeyInit, Nonce};
 use anyhow::anyhow;
 
-use crate::{backup_data::EncryptionData, derive_key::derive_key};
+use crate::{derive_key::derive_key, remote_hot_data::EncryptionData};
 
 pub fn decrypt_immutable_key(
     encryption_password: &[u8],

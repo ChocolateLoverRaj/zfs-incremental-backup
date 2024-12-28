@@ -1,1 +1,1 @@
-pub const ENCRYPTION_DATA_OBJECT_KEY: &str = "encryption_data";
+pub const HOT_DATA_OBJECT_KEY: &str = "hot_data";

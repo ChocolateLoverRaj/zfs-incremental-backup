@@ -3,13 +3,11 @@ use std::path::PathBuf;
 
 use anyhow::{anyhow, Context};
 use aws_config::BehaviorVersion;
-use aws_sdk_s3::primitives::ByteStream;
-use aws_sdk_s3::types::{BucketLocationConstraint, StorageClass};
-use backup_data::{BackupState, EncryptionData};
+use aws_sdk_s3::types::BucketLocationConstraint;
+use backup_data::BackupState;
 use check_key::decrypt_immutable_key;
 use chrono::Utc;
 use clap::{Parser, Subcommand};
-use config::ENCRYPTION_DATA_OBJECT_KEY;
 use derive_key::{encrypt_immutable_key, generate_salt_and_derive_key};
 use diff_or_first::diff_or_first;
 use get_config::get_config;
@@ -18,6 +16,7 @@ use init::init;
 use promptuity::prompts::Password;
 use promptuity::themes::MinimalTheme;
 use promptuity::{Promptuity, Term};
+use remote_hot_data::{download_hot_data, upload_hot_data, EncryptionData};
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
@@ -34,6 +33,7 @@ mod get_config;
 mod get_data;
 mod init;
 mod read_dir_recursive;
+mod remote_hot_data;
 mod serde_file;
 mod zfs_mount_get;
 
@@ -184,75 +184,47 @@ async fn main() -> anyhow::Result<()> {
             data_path,
         } => {
             let config = get_config(config_path).await?;
-            let data = get_data(data_path).await?;
-            match config.encryption_password {
-                Some(encryption_password) => {
-                    let encryption_password = encryption_password.get_bytes().await?;
+            let backup_data = get_data(data_path).await?;
+            let sdk_config = aws_config::defaults(BehaviorVersion::latest()).load().await;
+            let s3_client = aws_sdk_s3::Client::new(&sdk_config);
+            let remote_hot_data = download_hot_data(&s3_client, &backup_data).await?;
+            match remote_hot_data.encryption {
+                Some(encryption) => match config.encryption_password {
+                    Some(encryption_password) => {
+                        let encryption_password = encryption_password.get_bytes().await?;
 
-                    let check_local = || {
-                        decrypt_immutable_key(
-                            &encryption_password,
-                            &data.encryption.ok_or(anyhow!("No salt in data"))?,
-                        )?;
-                        anyhow::Ok("The password worked on the local backup data")
-                    };
-
-                    let check_remote = || async {
-                        let sdk_config =
-                            aws_config::defaults(BehaviorVersion::latest()).load().await;
-                        let s3_client = aws_sdk_s3::Client::new(&sdk_config);
-                        let output = s3_client
-                            .get_object()
-                            .bucket(data.s3_bucket)
-                            .key(ENCRYPTION_DATA_OBJECT_KEY)
-                            .send()
-                            .await?;
-                        let s3_encryption_data = output.body.collect().await?;
-                        let s3_encryption_data = postcard::from_bytes::<EncryptionData>(
-                            &s3_encryption_data.into_bytes(),
-                        )?;
-                        decrypt_immutable_key(&encryption_password, &s3_encryption_data)?;
-                        anyhow::Ok("The password worked on the remote backup data")
-                    };
-
-                    let results = [
-                        check_local().context("The password did not work on local data"),
-                        check_remote()
-                            .await
-                            .context("The password did not work on remote data"),
-                    ]
-                    .into_iter()
-                    .collect::<Vec<_>>();
-                    println!("{:#?}", results);
-                    results.into_iter().collect::<Result<Vec<_>, _>>()?;
-                }
-                None => {
-                    Err(anyhow!("Not encrypted"))?;
-                }
+                        decrypt_immutable_key(&encryption_password, &encryption)
+                            .context("The password did not work on the remote backup data")?;
+                        println!("The password worked on the remote backup data");
+                    }
+                    None => {
+                        Err(anyhow!("The remote data is encrypted, but the local config does not include a password. In this current state, you will not be able to recover the data."))?;
+                    }
+                },
+                None => match config.encryption_password {
+                    None => {
+                        println!("No password set. Not encrypted. No password needed to restore.");
+                    }
+                    Some(_) => {
+                        println!("A password is set in the config, but the remote data is not encrypted. This indicates a mismatch between the config and the remote data.");
+                    }
+                },
             }
         }
         Commands::ChangePassword {
             config_path,
             data_path,
         } => {
-            let config = get_config(config_path).await?;
-            let mut data = get_data(&data_path).await?;
-            match config.encryption_password {
+            let backup_config = get_config(config_path).await?;
+            let backup_data = get_data(&data_path).await?;
+            match backup_config.encryption_password {
                 Some(encryption_password) => {
                     let encryption_password = encryption_password.get_bytes().await?;
                     let sdk_config = aws_config::defaults(BehaviorVersion::latest()).load().await;
                     let s3_client = aws_sdk_s3::Client::new(&sdk_config);
-                    let output = s3_client
-                        .get_object()
-                        .bucket(&data.s3_bucket)
-                        .key(ENCRYPTION_DATA_OBJECT_KEY)
-                        .send()
-                        .await?;
-                    let s3_encryption_data = output.body.collect().await?;
-                    let s3_encryption_data =
-                        postcard::from_bytes::<EncryptionData>(&s3_encryption_data.into_bytes())?;
+                    let mut remote_hot_data = download_hot_data(&s3_client, &backup_data).await?;
                     let decrypted_immutable_key =
-                        decrypt_immutable_key(&encryption_password, &s3_encryption_data)?;
+                        decrypt_immutable_key(&encryption_password, &remote_hot_data.encryption.ok_or(anyhow!("The local config specifies an encryption password, but the remote data is not encrypted."))?)?;
 
                     let mut term = Term::default();
                     let mut theme = MinimalTheme::default();
@@ -280,23 +252,11 @@ async fn main() -> anyhow::Result<()> {
                         generate_salt_and_derive_key(new_password.as_bytes())?;
                     let encrypted_immutable_key =
                         encrypt_immutable_key(&new_derived_key, &decrypted_immutable_key)?;
-                    let new_encryption_data = EncryptionData {
+                    remote_hot_data.encryption = Some(EncryptionData {
                         password_derived_key_salt: new_salt,
                         encrypted_immutable_key,
-                    };
-                    s3_client
-                        .put_object()
-                        .bucket(&data.s3_bucket)
-                        .key(ENCRYPTION_DATA_OBJECT_KEY)
-                        .body(ByteStream::from(postcard::to_allocvec(
-                            &new_encryption_data,
-                        )?))
-                        .storage_class(StorageClass::Standard)
-                        .send()
-                        .await?;
-                    data.encryption = Some(new_encryption_data);
-                    write_data(data_path, &data).await?;
-
+                    });
+                    upload_hot_data(&s3_client, &backup_data, &remote_hot_data).await?;
                     println!("Changed encryption password. Make sure to update your config to use the new password because the previous password will not work. You can use `check-password` to check it.");
                 }
                 None => {

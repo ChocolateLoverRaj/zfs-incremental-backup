@@ -1,14 +1,13 @@
 use std::fmt::Display;
 
 use aes_gcm::{Aes256Gcm, Key};
-use aws_sdk_s3::primitives::ByteStream;
-use aws_sdk_s3::types::{BucketLocationConstraint, StorageClass};
+use aws_sdk_s3::types::BucketLocationConstraint;
 use rand::{thread_rng, Rng};
 
-use crate::backup_data::{BackupData, EncryptionData};
-use crate::config::ENCRYPTION_DATA_OBJECT_KEY;
+use crate::backup_data::BackupData;
 use crate::create_bucket::create_bucket;
 use crate::derive_key::{encrypt_immutable_key, generate_salt_and_derive_key};
+use crate::remote_hot_data::{upload_hot_data, EncryptionData, RemoteHotData};
 
 pub async fn init(
     s3_client: &aws_sdk_s3::Client,
@@ -46,22 +45,22 @@ pub async fn init(
                 }))
             })?;
 
-    if let Some(encryption_data) = &encryption_data {
-        s3_client
-            .put_object()
-            .bucket(&bucket)
-            .key(ENCRYPTION_DATA_OBJECT_KEY)
-            .body(ByteStream::from(postcard::to_allocvec(encryption_data)?))
-            .storage_class(StorageClass::Standard)
-            .send()
-            .await?;
-    }
-
-    Ok(BackupData {
+    let backup_data = BackupData {
         s3_bucket: bucket,
         s3_region: location.to_string(),
-        encryption: encryption_data,
         last_saved_snapshot_name: None,
         backup_state: None,
-    })
+    };
+
+    upload_hot_data(
+        s3_client,
+        &backup_data,
+        &RemoteHotData {
+            encryption: encryption_data,
+            snapshots: Default::default(),
+        },
+    )
+    .await?;
+
+    Ok(backup_data)
 }
