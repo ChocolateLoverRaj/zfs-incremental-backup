@@ -1,5 +1,3 @@
-use std::{future::Future, ops::DerefMut};
-
 #[derive(Debug, Clone, Copy)]
 pub enum RetryStepOutput<State, Output> {
     NotFinished(State),
