@@ -4,7 +4,8 @@ use crate::diff_or_first::DiffEntry;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BackupState {
-    pub diff: Vec<DiffEntry>,
+    pub snapshot_name: String,
+    pub diff: Option<Vec<DiffEntry<Option<u64>>>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

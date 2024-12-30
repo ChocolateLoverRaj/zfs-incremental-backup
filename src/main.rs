@@ -4,14 +4,12 @@ use std::path::PathBuf;
 use anyhow::{anyhow, Context};
 use aws_config::BehaviorVersion;
 use aws_sdk_s3::types::BucketLocationConstraint;
-use backup_data::BackupState;
+use backup_command::{backup_command, backup_command_2};
 use check_key::decrypt_immutable_key;
-use chrono::Utc;
 use clap::{Parser, Subcommand};
 use derive_key::{encrypt_immutable_key, generate_salt_and_derive_key};
-use diff_or_first::diff_or_first;
 use get_config::get_config;
-use get_data::{get_data, write_data};
+use get_data::get_data;
 use init::init;
 use promptuity::prompts::Password;
 use promptuity::themes::MinimalTheme;
@@ -19,10 +17,12 @@ use promptuity::{Promptuity, Term};
 use remote_hot_data::{download_hot_data, upload_hot_data, EncryptionData};
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
-use tokio::process::Command;
 
+mod aws_s3_prices;
+mod backup_command;
 mod backup_config;
 mod backup_data;
+mod backup_steps;
 mod check_key;
 mod config;
 mod create_bucket;
@@ -34,8 +34,10 @@ mod get_data;
 mod init;
 mod read_dir_recursive;
 mod remote_hot_data;
+mod retry_steps;
 mod serde_file;
 mod zfs_mount_get;
+mod zfs_take_snapshot;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -142,43 +144,7 @@ async fn main() -> anyhow::Result<()> {
             data_path,
             snapshot_name,
             take_snapshot,
-        } => {
-            let config = get_config(config_path).await?;
-            let mut data = get_data(&data_path).await?;
-            if data.backup_state.is_some() {
-                Err(anyhow!("Previous backup in progress!"))?;
-            };
-            let snapshot_name = if take_snapshot {
-                // Don't backup more than once a second please. It won't work.
-                let snapshot_name = snapshot_name
-                    .unwrap_or(format!("backup-{}", Utc::now().format("%Y-%m-%d_%H-%M-%S")));
-                println!("Snapshot name: {snapshot_name:?}");
-                let output = Command::new("zfs")
-                    .arg("snapshot")
-                    .arg(format!("{}@{}", config.zfs_dataset_name, snapshot_name))
-                    .output()
-                    .await?;
-                if !output.status.success() {
-                    Err(anyhow!("ZFS command failed: {output:#?}"))?;
-                }
-                println!("Took snapshot");
-                snapshot_name
-            } else {
-                snapshot_name.ok_or(anyhow!(
-                    "Must specify a snapshot name, or use --take-snapshot"
-                ))?
-            };
-            println!("Diffing...");
-            let diff = diff_or_first(
-                config.zfs_dataset_name,
-                data.last_saved_snapshot_name.as_deref(),
-                snapshot_name,
-            )
-            .await?;
-            println!("Diff: {diff:#?}");
-            data.backup_state = Some(BackupState { diff });
-            write_data(data_path, &data).await?;
-        }
+        } => backup_command_2(config_path, data_path, snapshot_name, take_snapshot).await?,
         Commands::CheckPassword {
             config_path,
             data_path,
