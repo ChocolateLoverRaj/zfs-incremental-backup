@@ -3,9 +3,22 @@ use serde::{Deserialize, Serialize};
 use crate::diff_or_first::DiffEntry;
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct BackupUploadState {
+    pub diff: Vec<DiffEntry<Option<u64>>>,
+    pub uploaded_objects: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum BackupStage {
+    Diff,
+    Upload(BackupUploadState),
+    UpdateHotData,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct BackupState {
     pub snapshot_name: String,
-    pub diff: Option<Vec<DiffEntry<Option<u64>>>>,
+    pub stage: BackupStage,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

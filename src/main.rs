@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use anyhow::{anyhow, Context};
 use aws_config::BehaviorVersion;
 use aws_sdk_s3::types::BucketLocationConstraint;
-use backup_command::{backup_command, backup_command_2};
+use backup_command::backup_command;
 use check_key::decrypt_immutable_key;
 use clap::{Parser, Subcommand};
 use derive_key::{encrypt_immutable_key, generate_salt_and_derive_key};
@@ -36,6 +36,7 @@ mod read_dir_recursive;
 mod remote_hot_data;
 mod retry_steps;
 mod serde_file;
+mod snapshot_upload_stream;
 mod zfs_mount_get;
 mod zfs_take_snapshot;
 
@@ -144,7 +145,7 @@ async fn main() -> anyhow::Result<()> {
             data_path,
             snapshot_name,
             take_snapshot,
-        } => backup_command_2(config_path, data_path, snapshot_name, take_snapshot).await?,
+        } => backup_command(config_path, data_path, snapshot_name, take_snapshot).await?,
         Commands::CheckPassword {
             config_path,
             data_path,
