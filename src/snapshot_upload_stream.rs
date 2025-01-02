@@ -1,21 +1,32 @@
 use std::{
+    future::Future,
     io::{self, SeekFrom},
     path::PathBuf,
+    task::Poll,
+    time::Duration,
 };
 
 use anyhow::anyhow;
-use futures::{AsyncRead, AsyncSeek, AsyncSeekExt, FutureExt};
+use bytes::Bytes;
+use futures::{future::BoxFuture, AsyncRead, AsyncSeek, AsyncSeekExt, FutureExt, Stream};
 use tokio::{
     fs::{File, OpenOptions},
     io::AsyncReadExt,
+    time::Sleep,
 };
 
 use crate::diff_or_first::DiffEntry;
 
+enum FileOpenFuture {
+    Opening(BoxFuture<'static, io::Result<File>>),
+    Opened(File),
+    Reading((File, BoxFuture<'static, io::Result<usize>>)),
+}
+
 enum ReadDiffEntryState {
     PostcardSize(u8),
     PostcardData(u64),
-    Content(Option<File>),
+    Content(FileOpenFuture),
 }
 
 impl ReadDiffEntryState {
@@ -258,91 +269,130 @@ impl AsyncRead for SnapshotUploadStream {
         cx: &mut std::task::Context<'_>,
         buf: &mut [u8],
     ) -> std::task::Poll<std::io::Result<usize>> {
-        async move {
-            let s = self.get_mut();
-            Ok(loop {
-                match &mut s.position_state {
-                    PositionState::ReadDiffEntry(diff_entry_position) => {
-                        match &mut diff_entry_position.state {
-                            ReadDiffEntryState::PostcardSize(index) => {
-                                let postcard_len = postcard::to_allocvec(
-                                    &s.diff_entries[diff_entry_position.diff_entry_index],
-                                )
-                                .map_err(|e| io::Error::other(e))?
-                                .len() as u64;
-                                break if *index == 0 && buf.len() >= 10 {
-                                    let size =
-                                        varint_simd::encode_to_slice(postcard_len, buf) as usize;
-                                    diff_entry_position.state = ReadDiffEntryState::PostcardData(0);
-                                    size
-                                } else {
-                                    let (len_buf, len_buf_len) = varint_simd::encode(postcard_len);
-                                    let copy_len = (len_buf_len - *index).min(buf.len() as u8);
-                                    buf[..copy_len as usize].copy_from_slice(
-                                        &len_buf[*index as usize..copy_len as usize],
-                                    );
-                                    *index += copy_len;
-                                    if *index == len_buf_len {
-                                        diff_entry_position.state =
-                                            ReadDiffEntryState::PostcardData(0);
-                                    }
-                                    copy_len as usize
-                                };
+        println!("Poll read");
+        let s = self.get_mut();
+        loop {
+            match &mut s.position_state {
+                PositionState::ReadDiffEntry(diff_entry_position) => match &mut diff_entry_position
+                    .state
+                {
+                    ReadDiffEntryState::PostcardSize(index) => {
+                        let postcard_len = postcard::to_allocvec(
+                            &s.diff_entries[diff_entry_position.diff_entry_index],
+                        )
+                        .map_err(|e| io::Error::other(e))?
+                        .len() as u64;
+                        break if *index == 0 && buf.len() >= 10 {
+                            let size = varint_simd::encode_to_slice(postcard_len, buf) as usize;
+                            diff_entry_position.state = ReadDiffEntryState::PostcardData(0);
+                            Poll::Ready(Ok(size))
+                        } else {
+                            let (len_buf, len_buf_len) = varint_simd::encode(postcard_len);
+                            let copy_len = (len_buf_len - *index).min(buf.len() as u8);
+                            buf[..copy_len as usize]
+                                .copy_from_slice(&len_buf[*index as usize..copy_len as usize]);
+                            *index += copy_len;
+                            if *index == len_buf_len {
+                                diff_entry_position.state = ReadDiffEntryState::PostcardData(0);
                             }
-                            ReadDiffEntryState::PostcardData(index) => {
-                                let postcard_data = postcard::to_allocvec(
-                                    &s.diff_entries[diff_entry_position.diff_entry_index],
-                                )
-                                .map_err(|e| io::Error::other(e))?;
-                                let copy_len =
-                                    (postcard_data.len() - *index as usize).max(buf.len());
-                                buf[..copy_len].copy_from_slice(&postcard_data);
-                                *index += copy_len as u64;
-                                if *index as usize == postcard_data.len() {
-                                    diff_entry_position.state = ReadDiffEntryState::Content(None);
-                                }
-                                break copy_len;
-                            }
-                            ReadDiffEntryState::Content(file) => {
-                                let file = match file {
-                                    None => file.insert(
-                                        OpenOptions::new()
-                                            .read(true)
-                                            .write(false)
-                                            .open(
-                                                s.mount_point.join(
-                                                    &s.diff_entries
-                                                        [diff_entry_position.diff_entry_index]
-                                                        .path,
-                                                ),
-                                            )
-                                            .await?,
-                                    ),
-                                    Some(file) => file,
-                                };
-                                let len = file.read(buf).await?;
-                                if len != 0 {
-                                    break len;
+                            Poll::Ready(Ok(copy_len as usize))
+                        };
+                    }
+                    ReadDiffEntryState::PostcardData(index) => {
+                        let diff_entry = &s.diff_entries[diff_entry_position.diff_entry_index];
+                        let postcard_data =
+                            postcard::to_allocvec(diff_entry).map_err(|e| io::Error::other(e))?;
+                        let copy_len = (postcard_data.len() - *index as usize).min(buf.len());
+                        buf[..copy_len].copy_from_slice(&postcard_data);
+                        *index += copy_len as u64;
+                        if *index as usize == postcard_data.len() {
+                            if let Some(d) = diff_entry.diff_type.content_data().copied().flatten()
+                            {
+                                println!("{:?} {}", &diff_entry, d);
+                                diff_entry_position.state =
+                                    ReadDiffEntryState::Content(FileOpenFuture::Opening(
+                                        File::open(self.mount_point.join(diff_entry.path)).boxed(),
+                                    ));
+                            } else {
+                                diff_entry_position.diff_entry_index += 1;
+                                if diff_entry_position.diff_entry_index < s.diff_entries.len() {
+                                    diff_entry_position.state = ReadDiffEntryState::PostcardSize(0);
                                 } else {
-                                    diff_entry_position.diff_entry_index += 1;
-                                    if diff_entry_position.diff_entry_index < s.diff_entries.len() {
-                                        diff_entry_position.state =
-                                            ReadDiffEntryState::PostcardSize(0);
-                                    } else {
-                                        s.position_state = PositionState::End;
-                                    }
+                                    s.position_state = PositionState::End;
                                 }
                             }
                         }
+                        break Poll::Ready(Ok(copy_len));
                     }
-                    PositionState::End => {
-                        // We're done
-                        break 0;
+                    ReadDiffEntryState::Content(file_open_future) => {
+                        match file_open_future {
+                            FileOpenFuture::Opening(future) => match future.poll_unpin(cx) {
+                                Poll::Pending => break Poll::Pending,
+                                Poll::Ready(result) => match result {
+                                    Ok(file) => {
+                                        *file_open_future = FileOpenFuture::Opened(file);
+                                    }
+                                    Err(e) => break Poll::Ready(Err(e)),
+                                },
+                            },
+                            FileOpenFuture::Opened(file) => {
+                                *file_open_future =
+                                    FileOpenFuture::Reading((*file, file.read(buf).boxed()));
+                            }
+                            FileOpenFuture::Reading((file, read_future)) => {
+                                match read_future.poll_unpin(cx) {
+                                    Poll::Pending => break Poll::Pending,
+                                    Poll::Ready(result) => match result {
+                                        Ok(len) => {
+                                            *file_open_future = FileOpenFuture::Opened(*file);
+                                            if len != 0 {
+                                                break Poll::Ready(Ok(len));
+                                            } else {
+                                                diff_entry_position.diff_entry_index += 1;
+                                                if diff_entry_position.diff_entry_index
+                                                    < s.diff_entries.len()
+                                                {
+                                                    diff_entry_position.state =
+                                                        ReadDiffEntryState::PostcardSize(0);
+                                                } else {
+                                                    s.position_state = PositionState::End;
+                                                }
+                                            }
+                                        }
+                                        Err(e) => break Poll::Ready(Err(e)),
+                                    },
+                                }
+                            }
+                        };
                     }
+                },
+                PositionState::End => {
+                    // We're done
+                    break Poll::Ready(Ok(0));
                 }
-            })
+            }
         }
-        .boxed_local()
-        .poll_unpin(cx)
+    }
+}
+
+impl Stream for SnapshotUploadStream {
+    type Item = io::Result<Bytes>;
+
+    fn poll_next(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        let mut buf = vec![0u8; 1024];
+        self.poll_read(cx, &mut buf).map(|a| match a {
+            Ok(a) => match a {
+                1.. => Some(Ok({
+                    let mut b = Bytes::from_owner(buf);
+                    b.truncate(a);
+                    b
+                })),
+                0 => None,
+            },
+            Err(e) => Some(Err(e)),
+        })
     }
 }

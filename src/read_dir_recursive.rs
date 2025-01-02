@@ -13,7 +13,6 @@ use tokio_stream::wrappers::ReadDirStream;
 pub fn read_dir_recursive(
     path: PathBuf,
 ) -> BoxStream<'static, (PathBuf, io::Result<(DirEntry, FileType)>)> {
-    println!("Reading dir: {path:?}");
     read_dir(path.clone())
         .map({
             let path = path.clone();

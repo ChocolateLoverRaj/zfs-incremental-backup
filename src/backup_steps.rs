@@ -1,25 +1,23 @@
-use std::io;
+use std::{io, time::Duration};
 
 use anyhow::anyhow;
 use aws_config::BehaviorVersion;
-use aws_sdk_s3::{
-    primitives::{ByteStream, SdkBody},
-    types::StorageClass,
-};
-use bytes::Bytes;
+use aws_sdk_s3::{primitives::ByteStream, types::StorageClass};
 use chrono::Utc;
-use futures::{stream, FutureExt, StreamExt, TryFutureExt, TryStreamExt};
+use futures::{stream, FutureExt, StreamExt, TryStreamExt};
 use humansize::{format_size, DECIMAL};
-use tokio::fs::File;
-use tokio_util::io::ReaderStream;
+use spinners::{Spinner, Spinners};
+use tokio::time::sleep;
 
 use crate::{
     backup_config::BackupConfig,
     backup_data::{BackupData, BackupStage, BackupState, BackupUploadState},
+    chunks_stream::ChunksStreamExt,
     config::SNAPSHOTS_PREFIX,
     diff_or_first::{diff_or_first, FileType},
     remote_hot_data::{download_hot_data, upload_hot_data},
     retry_steps::{RetryStepOutput, StepDoer},
+    snapshot_upload_stream_2::snapshot_upload_stream,
     zfs_mount_get::zfs_mount_get,
     zfs_take_snapshot::zfs_take_snapshot,
 };
@@ -30,13 +28,13 @@ pub struct BackupSteps {
     pub config: BackupConfig,
 }
 
-impl StepDoer<BackupData, (), anyhow::Error, anyhow::Error> for BackupSteps {
+impl StepDoer<BackupData, BackupData, anyhow::Error, anyhow::Error> for BackupSteps {
     async fn do_step<'a>(
         &'a mut self,
         mut backup_data: BackupData,
         state_saver: &mut impl crate::retry_steps::StateSaver<BackupData, anyhow::Error>,
-    ) -> Result<crate::retry_steps::RetryStepOutput<BackupData, ()>, anyhow::Error> {
-        match backup_data.backup_state.as_mut() {
+    ) -> Result<crate::retry_steps::RetryStepOutput<BackupData, BackupData>, anyhow::Error> {
+        match backup_data.backup_state.as_ref() {
             None => {
                 let snapshot_name = if self.take_snapshot {
                     // Don't backup more than once a second please. It won't work.
@@ -63,7 +61,7 @@ impl StepDoer<BackupData, (), anyhow::Error, anyhow::Error> for BackupSteps {
                 Ok(RetryStepOutput::NotFinished(backup_data))
             }
             Some(backup_state) => {
-                match &mut backup_state.stage {
+                match &backup_state.stage {
                     BackupStage::Diff => {
                         // TODO: When scanning files for the first snapshot, we could continue where we left off if we fail
                         println!("Diffing...");
@@ -109,10 +107,20 @@ impl StepDoer<BackupData, (), anyhow::Error, anyhow::Error> for BackupSteps {
                         .try_collect::<Vec<_>>()
                         .await?;
                         println!("Diff: {diff:#?}");
-                        backup_state.stage = BackupStage::Upload(BackupUploadState {
-                            diff,
-                            uploaded_objects: 0,
-                        });
+                        backup_data = BackupData {
+                            backup_state: Some(BackupState {
+                                stage: BackupStage::Upload(BackupUploadState {
+                                    diff,
+                                    uploaded_objects: 0,
+                                }),
+                                ..backup_state.clone()
+                            }),
+                            ..backup_data
+                        };
+                        // backup_state.stage = BackupStage::Upload(BackupUploadState {
+                        //     diff,
+                        //     uploaded_objects: 0,
+                        // });
                         // We fail on save error because we don't want to keep re-diffing everything, which could involve reading thousands of files
                         state_saver.save_state(&backup_data).await?;
                         Ok(RetryStepOutput::NotFinished(backup_data))
@@ -130,10 +138,6 @@ impl StepDoer<BackupData, (), anyhow::Error, anyhow::Error> for BackupSteps {
                                         + diff_entry.diff_type.content_data().copied().flatten().unwrap_or(0),
                             )
                         })?;
-                        println!(
-                            "Snapshot upload size: {}",
-                            format_size(snapshot_upload_size, DECIMAL)
-                        );
 
                         // TODO: We could save space by not including the full path
                         // TODO: Maybe upload smaller files or use multipart upload in case 5GB uploads fail
@@ -142,82 +146,99 @@ impl StepDoer<BackupData, (), anyhow::Error, anyhow::Error> for BackupSteps {
                         let s3_client = aws_sdk_s3::Client::new(&sdk_config);
 
                         // 5GB, in bytes
-                        let max_object_size: u64 = 5 * 1000 * 1000 * 1000;
+                        // let max_object_size: u64 = 5 * 1000 * 1000 * 1000;
+                        let max_object_size: u64 = 300;
+
                         let objects_count = snapshot_upload_size.div_ceil(max_object_size);
+
+                        println!(
+                            "Snapshot upload size: {}",
+                            format_size(snapshot_upload_size, DECIMAL)
+                        );
+                        println!("Snapshots will be uploaded in {} parts", objects_count);
+
+                        let snapshot_upload_stream = {
+                            let s = snapshot_upload_stream(
+                                // FIXME: Use mountpoint of SNAPSHOT, not the latest files
+                                zfs_mount_get(&self.config.zfs_dataset_name)
+                                    .await?
+                                    .ok_or(anyhow!("No zfs mountpoint"))?,
+                                upload_state.diff.clone(),
+                                upload_state.uploaded_objects * max_object_size,
+                            );
+                            s.try_chunks_streams()
+                        };
+                        // let bytes = snapshot_upload_stream
+                        //     .clone()
+                        //     .take_bytes_stream(max_object_size as usize)
+                        //     .try_collect::<Vec<_>>()
+                        //     .await?;
+                        // println!("Bytes: {}", bytes.len());
+                        let snapshot_name = backup_state.snapshot_name.clone();
+                        let mut uploaded_objects = upload_state.uploaded_objects;
                         loop {
-                            if upload_state.uploaded_objects == objects_count {
+                            if uploaded_objects == objects_count {
                                 break;
                             }
-                            println!("Uploading test");
+                            // let s = s.clone();
+                            let object_len = (snapshot_upload_size
+                                - uploaded_objects * max_object_size)
+                                .min(max_object_size);
+                            let mut spinner = Spinner::with_timer(
+                                Spinners::Dots,
+                                format!(
+                                    "Uploading part {} ({})",
+                                    uploaded_objects,
+                                    format_size(object_len, DECIMAL)
+                                ),
+                            );
                             s3_client
                                 .put_object()
                                 // TODO: Deep Archive
                                 .storage_class(StorageClass::Standard)
                                 .bucket(&backup_data.s3_bucket)
                                 .key(format!(
-                                    "{}/{}/0",
-                                    SNAPSHOTS_PREFIX, &backup_state.snapshot_name
+                                    "{}/{}/{}",
+                                    SNAPSHOTS_PREFIX, snapshot_name, uploaded_objects
                                 ))
+                                .content_length(object_len as i64)
                                 .body({
-                                    let mount_point = zfs_mount_get(&self.config.zfs_dataset_name)
-                                        .await?
-                                        .ok_or(anyhow!("Not mounted"))?;
-                                    let stream = stream::iter(upload_state.diff.to_vec()).flat_map(
-                                        move |diff_entry| {
-                                            // FIXME: Don't panic here
-                                            let postcard_bytes =
-                                                postcard::to_allocvec(&diff_entry).unwrap();
-                                            let postcard_size_bytes = {
-                                                let mut postcard_size_bytes =
-                                                    vec![u8::default(); 10];
-                                                let postcard_size_bytes_len =
-                                                    varint_simd::encode_to_slice(
-                                                        postcard_bytes.len() as u64,
-                                                        postcard_size_bytes.as_mut_slice(),
-                                                    );
-                                                postcard_size_bytes
-                                                    .truncate(postcard_size_bytes_len as usize);
-                                                postcard_size_bytes
-                                            };
-                                            let s = stream::iter([
-                                                Ok(Bytes::from(postcard_size_bytes)),
-                                                Ok(postcard_bytes.into()),
-                                            ]);
-                                            match diff_entry
-                                                .diff_type
-                                                .content_data()
-                                                .copied()
-                                                .flatten()
-                                            {
-                                                Some(_file_len) => s
-                                                    .chain(
-                                                        File::open(
-                                                            mount_point.join(diff_entry.path),
-                                                        )
-                                                        .map(|result| {
-                                                            result
-                                                                .map(|file| ReaderStream::new(file))
-                                                        })
-                                                        .try_flatten_stream(),
-                                                    )
-                                                    .boxed(),
-                                                None => s.boxed(),
-                                            }
-                                        },
-                                    );
-                                    let body = reqwest::Body::wrap_stream(stream);
-                                    let byte_stream = ByteStream::new(SdkBody::from_body_1_x(body));
-                                    byte_stream
+                                    ByteStream::from_body_1_x(reqwest::Body::wrap_stream(
+                                        snapshot_upload_stream
+                                            .take_bytes_stream(max_object_size as usize),
+                                    ))
                                 })
-                                .content_length(snapshot_upload_size as i64)
                                 .send()
                                 .await?;
-                            println!("Uploaded test");
+                            // For testing, add a delay
+                            sleep(Duration::from_secs(5)).await;
+                            spinner.stop_with_newline();
+
+                            uploaded_objects += 1;
+                            state_saver
+                                .save_state(&{
+                                    let mut backup_data = backup_data.clone();
+                                    match &mut backup_data.backup_state.as_mut().unwrap().stage {
+                                        BackupStage::Upload(upload_state) => upload_state,
+                                        _ => unreachable!(),
+                                    }
+                                    .uploaded_objects = uploaded_objects;
+                                    backup_data
+                                })
+                                .await?;
                         }
-                        backup_state.stage = BackupStage::UpdateHotData;
+                        let backup_data = {
+                            let mut backup_data = backup_data.clone();
+                            backup_data.backup_state.as_mut().unwrap().stage =
+                                BackupStage::UpdateHotData;
+                            backup_data
+                        };
+                        state_saver.save_state(&backup_data).await?;
                         Ok(RetryStepOutput::NotFinished(backup_data))
                     }
                     BackupStage::UpdateHotData => {
+                        let mut spinner =
+                            Spinner::with_timer(Spinners::Dots, "Updating hot data".into());
                         let sdk_config =
                             aws_config::defaults(BehaviorVersion::latest()).load().await;
                         let s3_client = aws_sdk_s3::Client::new(&sdk_config);
@@ -228,7 +249,11 @@ impl StepDoer<BackupData, (), anyhow::Error, anyhow::Error> for BackupSteps {
                             hot_data.snapshots.push(snapshot_name);
                             upload_hot_data(&s3_client, &backup_data, &hot_data).await?;
                         }
-                        Ok(RetryStepOutput::Finished(()))
+                        spinner.stop_with_newline();
+                        backup_data.last_saved_snapshot_name =
+                            Some(backup_state.snapshot_name.clone());
+                        backup_data.backup_state = None;
+                        Ok(RetryStepOutput::Finished(backup_data))
                     }
                 }
             }

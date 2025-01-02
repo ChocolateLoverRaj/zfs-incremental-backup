@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use anyhow::{anyhow, Context};
 use aws_config::BehaviorVersion;
 use aws_sdk_s3::types::BucketLocationConstraint;
-use backup_command::backup_command;
+use backup_command::{backup_commands, backup_start_command, BackupCommand};
 use check_key::decrypt_immutable_key;
 use clap::{Parser, Subcommand};
 use derive_key::{encrypt_immutable_key, generate_salt_and_derive_key};
@@ -24,6 +24,7 @@ mod backup_config;
 mod backup_data;
 mod backup_steps;
 mod check_key;
+mod chunks_stream;
 mod config;
 mod create_bucket;
 mod derive_key;
@@ -36,7 +37,7 @@ mod read_dir_recursive;
 mod remote_hot_data;
 mod retry_steps;
 mod serde_file;
-mod snapshot_upload_stream;
+mod snapshot_upload_stream_2;
 mod zfs_mount_get;
 mod zfs_take_snapshot;
 
@@ -67,18 +68,8 @@ enum Commands {
         force: bool,
     },
     Backup {
-        /// Path to a JSON file with config
-        #[arg(short, long)]
-        config_path: PathBuf,
-        /// Path to the backup data JSON file
-        #[arg(short, long)]
-        data_path: PathBuf,
-        /// Snapshot name (or id, if it already exists)
-        #[arg(short, long)]
-        snapshot_name: Option<String>,
-        /// If this is `true`, a snapshot will be taken with the name
-        #[arg(short, long)]
-        take_snapshot: bool,
+        #[command(subcommand)]
+        command: BackupCommand,
     },
     CheckPassword {
         /// Path to a JSON file with config
@@ -140,12 +131,7 @@ async fn main() -> anyhow::Result<()> {
                 .await?;
             println!("Saved backup data: {:#?}", backup_data);
         }
-        Commands::Backup {
-            config_path,
-            data_path,
-            snapshot_name,
-            take_snapshot,
-        } => backup_command(config_path, data_path, snapshot_name, take_snapshot).await?,
+        Commands::Backup { command } => backup_commands(command).await?,
         Commands::CheckPassword {
             config_path,
             data_path,
