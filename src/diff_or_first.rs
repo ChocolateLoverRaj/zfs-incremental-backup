@@ -1,11 +1,11 @@
-use std::{io::BufRead, path::PathBuf};
+use std::{fs::Metadata, io::BufRead, path::PathBuf};
 
 use anyhow::anyhow;
 use futures::{future::BoxFuture, stream, FutureExt, StreamExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 
-use crate::{read_dir_recursive::read_dir_recursive, zfs_mount_get::zfs_mount_get};
+use crate::{read_dir_recursive::read_dir_recursive, zfs_mount_get::zfs_snapshot_mount_get};
 
 /// Based on https://openzfs.github.io/openzfs-docs/man/master/8/zfs-diff.8.html, but only the types relevant to backups
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
@@ -149,7 +149,7 @@ pub async fn diff_or_first(
     dataset: &str,
     previous_snapshot: Option<&str>,
     recent_snapshot: &str,
-) -> anyhow::Result<Vec<DiffEntry<Option<u64>>>> {
+) -> anyhow::Result<Vec<DiffEntry<Option<Metadata>>>> {
     if let Some(previous_snapshot) = previous_snapshot {
         let command = Command::new("zfs")
             .arg("diff")
@@ -178,7 +178,7 @@ pub async fn diff_or_first(
         diff_entries.sort_by_key(|diff| diff.path.clone());
         Ok(diff_entries)
     } else {
-        let mount_point = zfs_mount_get(&dataset)
+        let mount_point = zfs_snapshot_mount_get(dataset, recent_snapshot)
             .await?
             .ok_or(anyhow!("dataset not mounted"))?;
         println!("Got mountpoint: {mount_point:?}");
@@ -200,7 +200,7 @@ pub async fn diff_or_first(
                     anyhow::Ok(DiffEntry {
                         path: path.strip_prefix(&mount_point)?.into(),
                         diff_type: DiffType::Created(match file_type {
-                            FileType::RegularFile => Some(dir_entry.metadata().await?.len()),
+                            FileType::RegularFile => Some(dir_entry.metadata().await?),
                             FileType::Directory => None,
                         }),
                         file_type,

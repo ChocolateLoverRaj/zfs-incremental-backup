@@ -1,10 +1,10 @@
 use serde::{Deserialize, Serialize};
 
-use crate::diff_or_first::DiffEntry;
+use crate::{diff_or_first::DiffEntry, file_meta_data::FileMetaData};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct BackupUploadState {
-    pub diff: Vec<DiffEntry<Option<u64>>>,
+    pub diff: Vec<DiffEntry<Option<FileMetaData>>>,
     pub uploaded_objects: u64,
 }
 

@@ -5,11 +5,11 @@ use futures::{stream, FutureExt, Stream, StreamExt, TryFutureExt};
 use tokio::{fs::File, io::AsyncSeekExt};
 use tokio_util::io::ReaderStream;
 
-use crate::diff_or_first::DiffEntry;
+use crate::{diff_or_first::DiffEntry, file_meta_data::FileMetaData};
 
 pub fn snapshot_upload_stream<'a>(
     mount_point: PathBuf,
-    diff_entries: Vec<DiffEntry<Option<u64>>>,
+    diff_entries: Vec<DiffEntry<Option<FileMetaData>>>,
     mut start_index: u64,
 ) -> impl Stream<Item = io::Result<Bytes>> + 'a {
     stream::iter(diff_entries).flat_map(move |diff_entry| {
@@ -38,10 +38,10 @@ pub fn snapshot_upload_stream<'a>(
                 }
                 let s = stream::iter(sync_chunks);
                 match diff_entry.diff_type.content_data().copied().flatten() {
-                    Some(file_len) => {
+                    Some(file_meta_data) => {
                         if start_index > 0 {
-                            if start_index >= file_len {
-                                start_index -= file_len;
+                            if start_index >= file_meta_data.len {
+                                start_index -= file_meta_data.len;
                                 s.boxed()
                             } else {
                                 s.chain(

@@ -18,7 +18,7 @@ use crate::{
     remote_hot_data::{download_hot_data, upload_hot_data},
     retry_steps::{RetryStepOutput, StepDoer},
     snapshot_upload_stream_2::snapshot_upload_stream,
-    zfs_mount_get::zfs_mount_get,
+    zfs_mount_get::zfs_snapshot_mount_get,
     zfs_take_snapshot::zfs_take_snapshot,
 };
 
@@ -84,14 +84,14 @@ impl StepDoer<BackupData, BackupData, anyhow::Error, anyhow::Error> for BackupSt
                                         let file_type = file_type.clone();
                                         async move {
                                             Ok::<_, io::Error>(match option {
-                                                Some(len) => Some(len),
+                                                Some(len) => Some((&len).into()),
                                                 None => match file_type {
                                                     FileType::RegularFile => {
                                                         // TODO: Save metadata progress so retries don't need to get all the metadata again
                                                         Some(
-                                                            tokio::fs::metadata(value.clone())
-                                                                .await?
-                                                                .len(),
+                                                            (&tokio::fs::metadata(value.clone())
+                                                                .await?)
+                                                                .into(),
                                                         )
                                                     }
                                                     FileType::Directory => None,
@@ -135,7 +135,7 @@ impl StepDoer<BackupData, BackupData, anyhow::Error, anyhow::Error> for BackupSt
                                         // Postcard also contain length of content
                                         + postcard_len
                                         // The content (for create / modify)
-                                        + diff_entry.diff_type.content_data().copied().flatten().unwrap_or(0),
+                                        + diff_entry.diff_type.content_data().copied().flatten().map_or(0, |file_meta_data| file_meta_data.len),
                             )
                         })?;
 
@@ -156,31 +156,31 @@ impl StepDoer<BackupData, BackupData, anyhow::Error, anyhow::Error> for BackupSt
                             format_size(snapshot_upload_size, DECIMAL)
                         );
                         println!("Snapshots will be uploaded in {} parts", objects_count);
+                        if upload_state.uploaded_objects > 0 {
+                            println!(
+                                "{} parts were already uploaded. Starting from there.",
+                                upload_state.uploaded_objects
+                            )
+                        }
 
-                        let snapshot_upload_stream = {
-                            let s = snapshot_upload_stream(
-                                // FIXME: Use mountpoint of SNAPSHOT, not the latest files
-                                zfs_mount_get(&self.config.zfs_dataset_name)
-                                    .await?
-                                    .ok_or(anyhow!("No zfs mountpoint"))?,
-                                upload_state.diff.clone(),
-                                upload_state.uploaded_objects * max_object_size,
-                            );
-                            s.try_chunks_streams()
-                        };
-                        // let bytes = snapshot_upload_stream
-                        //     .clone()
-                        //     .take_bytes_stream(max_object_size as usize)
-                        //     .try_collect::<Vec<_>>()
-                        //     .await?;
-                        // println!("Bytes: {}", bytes.len());
+                        let snapshot_upload_stream = snapshot_upload_stream(
+                            zfs_snapshot_mount_get(
+                                &self.config.zfs_dataset_name,
+                                &backup_state.snapshot_name,
+                            )
+                            .await?
+                            .ok_or(anyhow!("No zfs mountpoint"))?,
+                            upload_state.diff.clone(),
+                            upload_state.uploaded_objects * max_object_size,
+                        )
+                        .try_chunks_streams();
                         let snapshot_name = backup_state.snapshot_name.clone();
                         let mut uploaded_objects = upload_state.uploaded_objects;
                         loop {
                             if uploaded_objects == objects_count {
                                 break;
                             }
-                            // let s = s.clone();
+                            sleep(Duration::from_secs(5)).await;
                             let object_len = (snapshot_upload_size
                                 - uploaded_objects * max_object_size)
                                 .min(max_object_size);
@@ -211,7 +211,6 @@ impl StepDoer<BackupData, BackupData, anyhow::Error, anyhow::Error> for BackupSt
                                 .send()
                                 .await?;
                             // For testing, add a delay
-                            sleep(Duration::from_secs(5)).await;
                             spinner.stop_with_newline();
 
                             uploaded_objects += 1;

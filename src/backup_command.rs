@@ -34,10 +34,21 @@ pub struct BackupStartCommand {
     take_snapshot: bool,
 }
 
+#[derive(Parser)]
+pub struct BackupContinueCommand {
+    /// Path to a JSON file with config
+    #[arg(short, long)]
+    config_path: PathBuf,
+    /// Path to the backup data JSON file
+    #[arg(short, long)]
+    data_path: PathBuf,
+}
+
 #[derive(Subcommand)]
 pub enum BackupCommand {
     Status(BackupStatusCommand),
     Start(BackupStartCommand),
+    Continue(BackupContinueCommand),
 }
 
 pub async fn backup_status_command(
@@ -58,6 +69,17 @@ pub async fn backup_status_command(
     Ok(())
 }
 
+// TODO: impl the trait for a closure so we don't have to make this struct and implement it for the struct
+struct BackupStateSaver {
+    backup_data_path: PathBuf,
+}
+
+impl StateSaver<BackupData, anyhow::Error> for BackupStateSaver {
+    async fn save_state<'a>(&'a mut self, state: &'a BackupData) -> Result<(), anyhow::Error> {
+        Ok(write_data(&self.backup_data_path, state).await?)
+    }
+}
+
 pub async fn backup_start_command(
     BackupStartCommand {
         config_path,
@@ -71,34 +93,46 @@ pub async fn backup_start_command(
     if backup_data.backup_state.is_some() {
         Err(anyhow!("Failed backup in progress. It can be continued / retried, but the command to continue failed backup not implemented yet."))?;
     }
-    retry_with_steps(
+    let backup_data = retry_with_steps(
         backup_data,
         BackupSteps {
             config: backup_config,
             take_snapshot,
             snapshot_name,
         },
-        {
-            // TODO: impl the trait for a closure so we don't have to make this struct and implement it for the struct
-            struct BackupStateSaver {
-                backup_data_path: PathBuf,
-            }
-
-            impl StateSaver<BackupData, anyhow::Error> for BackupStateSaver {
-                async fn save_state<'a>(
-                    &'a mut self,
-                    state: &'a BackupData,
-                ) -> Result<(), anyhow::Error> {
-                    Ok(write_data(&self.backup_data_path, state).await?)
-                }
-            }
-
-            BackupStateSaver {
-                backup_data_path: data_path,
-            }
+        BackupStateSaver {
+            backup_data_path: data_path.clone(),
         },
     )
     .await?;
+    write_data(&data_path, &backup_data).await?;
+    Ok(())
+}
+
+pub async fn backup_continue_command(
+    BackupContinueCommand {
+        config_path,
+        data_path,
+    }: BackupContinueCommand,
+) -> anyhow::Result<()> {
+    let backup_config = get_config(&config_path).await?;
+    let backup_data = get_data(&data_path).await?;
+    if backup_data.backup_state.is_none() {
+        Err(anyhow!("No backup in progress"))?;
+    }
+    let backup_data = retry_with_steps(
+        backup_data,
+        BackupSteps {
+            config: backup_config,
+            take_snapshot: false,
+            snapshot_name: None,
+        },
+        BackupStateSaver {
+            backup_data_path: data_path.clone(),
+        },
+    )
+    .await?;
+    write_data(&data_path, &backup_data).await?;
     Ok(())
 }
 
@@ -106,6 +140,7 @@ pub async fn backup_commands(backup_command: BackupCommand) -> anyhow::Result<()
     match backup_command {
         BackupCommand::Start(command) => backup_start_command(command).await?,
         BackupCommand::Status(command) => backup_status_command(command).await?,
+        BackupCommand::Continue(command) => backup_continue_command(command).await?,
     }
     Ok(())
 }
