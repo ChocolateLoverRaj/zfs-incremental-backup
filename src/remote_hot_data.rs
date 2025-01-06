@@ -22,12 +22,12 @@ pub struct RemoteHotData {
 
 pub async fn upload_hot_data(
     s3_client: &aws_sdk_s3::Client,
-    backup_data: &BackupData,
+    s3_bucket: &str,
     remote_hot_data: &RemoteHotData,
 ) -> anyhow::Result<()> {
     s3_client
         .put_object()
-        .bucket(&backup_data.s3_bucket)
+        .bucket(s3_bucket)
         .key(HOT_DATA_OBJECT_KEY)
         .body(ByteStream::from(postcard::to_allocvec(remote_hot_data)?))
         .storage_class(StorageClass::Standard)
@@ -38,11 +38,11 @@ pub async fn upload_hot_data(
 
 pub async fn download_hot_data(
     s3_client: &aws_sdk_s3::Client,
-    backup_data: &BackupData,
+    s3_bucket: &str,
 ) -> anyhow::Result<RemoteHotData> {
     let remote_hot_data = s3_client
         .get_object()
-        .bucket(&backup_data.s3_bucket)
+        .bucket(s3_bucket)
         .key(HOT_DATA_OBJECT_KEY)
         .send()
         .await?

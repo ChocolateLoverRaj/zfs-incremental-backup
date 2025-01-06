@@ -49,12 +49,12 @@ pub async fn init(
         s3_bucket: bucket,
         s3_region: location.to_string(),
         last_saved_snapshot_name: None,
-        backup_state: None,
+        backup_step: None,
     };
 
     upload_hot_data(
         s3_client,
-        &backup_data,
+        &backup_data.s3_bucket,
         &RemoteHotData {
             encryption: encryption_data,
             snapshots: Default::default(),

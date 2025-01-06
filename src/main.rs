@@ -141,7 +141,7 @@ async fn main() -> anyhow::Result<()> {
             let backup_data = get_data(data_path).await?;
             let sdk_config = aws_config::defaults(BehaviorVersion::latest()).load().await;
             let s3_client = aws_sdk_s3::Client::new(&sdk_config);
-            let remote_hot_data = download_hot_data(&s3_client, &backup_data).await?;
+            let remote_hot_data = download_hot_data(&s3_client, &backup_data.s3_bucket).await?;
             match remote_hot_data.encryption {
                 Some(encryption) => match config.encryption_password {
                     Some(encryption_password) => {
@@ -176,7 +176,8 @@ async fn main() -> anyhow::Result<()> {
                     let encryption_password = encryption_password.get_bytes().await?;
                     let sdk_config = aws_config::defaults(BehaviorVersion::latest()).load().await;
                     let s3_client = aws_sdk_s3::Client::new(&sdk_config);
-                    let mut remote_hot_data = download_hot_data(&s3_client, &backup_data).await?;
+                    let mut remote_hot_data =
+                        download_hot_data(&s3_client, &backup_data.s3_bucket).await?;
                     let decrypted_immutable_key =
                         decrypt_immutable_key(&encryption_password, &remote_hot_data.encryption.ok_or(anyhow!("The local config specifies an encryption password, but the remote data is not encrypted."))?)?;
 
@@ -210,7 +211,7 @@ async fn main() -> anyhow::Result<()> {
                         password_derived_key_salt: new_salt,
                         encrypted_immutable_key,
                     });
-                    upload_hot_data(&s3_client, &backup_data, &remote_hot_data).await?;
+                    upload_hot_data(&s3_client, &backup_data.s3_bucket, &remote_hot_data).await?;
                     println!("Changed encryption password. Make sure to update your config to use the new password because the previous password will not work. You can use `check-password` to check it.");
                 }
                 None => {
