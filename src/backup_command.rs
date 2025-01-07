@@ -1,4 +1,4 @@
-use std::{borrow::Cow, ops::Deref, path::PathBuf, rc::Rc};
+use std::{borrow::Cow, path::PathBuf, rc::Rc};
 
 use anyhow::anyhow;
 use clap::{Parser, Subcommand};
@@ -9,7 +9,7 @@ use crate::{
     backup_steps::BackupSteps,
     get_config::get_config,
     get_data::{get_data, write_data},
-    retry_steps::{retry_with_steps, StateSaver},
+    retry_steps_2::{retry_with_steps_2, StateSaver2},
 };
 
 #[derive(Parser)]
@@ -80,7 +80,7 @@ struct BackupStateSaver<'a> {
     backup_data_without_step: Rc<BackupData<'a>>,
 }
 
-impl<'a> StateSaver<BackupStep<'a>, anyhow::Error> for BackupStateSaver<'a> {
+impl<'a> StateSaver2<BackupStep<'a>, anyhow::Error> for BackupStateSaver<'a> {
     async fn save_state(&self, state: &BackupStep<'a>) -> Result<(), anyhow::Error> {
         Ok(write_data(
             &self.backup_data_path,
@@ -126,7 +126,7 @@ pub async fn backup_start_command(
             allow_empty,
         )
         .await?;
-    let did_backup = retry_with_steps(
+    let did_backup = retry_with_steps_2(
         state,
         &mut backup_steps,
         &mut BackupStateSaver {
@@ -160,8 +160,11 @@ pub async fn backup_continue_command(
     let backup_data = Rc::new(get_data(&data_path).await?);
     match &backup_data.backup_step {
         Some(backup_step) => {
-            retry_with_steps(
-                backup_step.shallow_clone(),
+            let last_saved_snapshot_name = retry_with_steps_2(
+                crate::retry_steps_2::RetryStepNotFinished2 {
+                    memory_data: Default::default(),
+                    persistent_data: backup_step.shallow_clone(),
+                },
                 &mut BackupSteps {
                     config: backup_config,
                     backup_data: backup_data.clone(),
@@ -171,11 +174,14 @@ pub async fn backup_continue_command(
                     backup_data_without_step: backup_data.clone(),
                 },
             )
-            .await?;
+            .await?
+            // Will never panic because will never be None
+            .unwrap();
             write_data(
                 &data_path,
                 &BackupData {
                     backup_step: None,
+                    last_saved_snapshot_name: Some(last_saved_snapshot_name),
                     ..backup_data.shallow_clone()
                 },
             )
