@@ -7,11 +7,11 @@ use tokio_util::io::ReaderStream;
 
 use crate::{diff_or_first::DiffEntry, file_meta_data::FileMetaData};
 
-pub fn snapshot_upload_stream<'a>(
+pub fn snapshot_upload_stream(
     mount_point: PathBuf,
     diff_entries: Vec<DiffEntry<Option<FileMetaData>>>,
     mut start_index: u64,
-) -> impl Stream<Item = io::Result<Bytes>> + 'a {
+) -> impl Stream<Item = io::Result<Bytes>> {
     stream::iter(diff_entries).flat_map(move |diff_entry| {
         match postcard::to_allocvec(&diff_entry) {
             Ok(postcard_bytes) => {

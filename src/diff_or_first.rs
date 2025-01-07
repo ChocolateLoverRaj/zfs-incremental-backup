@@ -8,7 +8,7 @@ use tokio::process::Command;
 use crate::{read_dir_recursive::read_dir_recursive, zfs_mount_get::zfs_snapshot_mount_get};
 
 /// Based on https://openzfs.github.io/openzfs-docs/man/master/8/zfs-diff.8.html, but only the types relevant to backups
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone, Copy)]
 pub enum FileType {
     Directory,
     RegularFile,
@@ -160,7 +160,10 @@ pub async fn diff_or_first(
             .output()
             .await?;
         if !command.status.success() {
-            Err(anyhow!("zfs diff failed"))?;
+            Err(anyhow!(
+                "zfs diff failed: {:?}. Do the snapshots exist? Are you trying to compare the same snapshot with itself?",
+                String::from_utf8(command.stderr)
+            ))?;
         }
         let mut diff_entries = parse_zfs_diff_output(command.stdout)?
             .into_iter()

@@ -1,7 +1,8 @@
-use std::path::PathBuf;
+use std::{borrow::Cow, ops::Deref, path::PathBuf, rc::Rc};
 
 use anyhow::anyhow;
 use clap::{Parser, Subcommand};
+use shallowclone::ShallowClone;
 
 use crate::{
     backup_data::{BackupData, BackupStep},
@@ -74,18 +75,20 @@ pub async fn backup_status_command(
 }
 
 // TODO: impl the trait for a closure so we don't have to make this struct and implement it for the struct
-struct BackupStateSaver {
+struct BackupStateSaver<'a> {
     backup_data_path: PathBuf,
-    backup_data_without_step: BackupData,
+    backup_data_without_step: Rc<BackupData<'a>>,
 }
 
-impl StateSaver<BackupStep, anyhow::Error> for BackupStateSaver {
-    async fn save_state<'a>(&'a mut self, state: &'a BackupStep) -> Result<(), anyhow::Error> {
-        Ok(write_data(&self.backup_data_path, &{
-            let mut backup_data = self.backup_data_without_step.clone();
-            backup_data.backup_step = Some(state.clone());
-            backup_data
-        })
+impl<'a> StateSaver<BackupStep<'a>, anyhow::Error> for BackupStateSaver<'a> {
+    async fn save_state(&self, state: &BackupStep<'a>) -> Result<(), anyhow::Error> {
+        Ok(write_data(
+            &self.backup_data_path,
+            &BackupData {
+                backup_step: Some(state.shallow_clone()),
+                ..self.backup_data_without_step.shallow_clone()
+            },
+        )
         .await?)
     }
 }
@@ -100,29 +103,47 @@ pub async fn backup_start_command(
     }: BackupStartCommand,
 ) -> anyhow::Result<()> {
     let backup_config = get_config(&config_path).await?;
-    let backup_data = get_data(&data_path).await?;
+    let backup_data = Rc::new(get_data(&data_path).await?);
     if backup_data.backup_step.is_some() {
-        Err(anyhow!("Failed backup in progress. It can be continued / retried, but the command to continue failed backup not implemented yet."))?;
+        Err(anyhow!(
+            "Failed backup in progress. Use the continue command to continue in progress backup."
+        ))?;
     }
-    let backup_steps = BackupSteps {
+    // Note that this only checks the last saved snapshot and there could still be backups that are already uploaded
+    if backup_data.last_saved_snapshot_name.is_some()
+        && backup_data.last_saved_snapshot_name.as_deref() == snapshot_name.as_deref()
+    {
+        Err(anyhow!("Already saved a snapshot with that name"))?;
+    }
+    let mut backup_steps = BackupSteps {
         config: backup_config,
-        last_saved_snapshot_name: backup_data.last_saved_snapshot_name.clone(),
-        s3_bucket: backup_data.s3_bucket.clone(),
+        backup_data: backup_data.clone(),
     };
-    let backup_data_without_step = backup_data;
+    let state = backup_steps
+        .start(
+            take_snapshot,
+            snapshot_name.map(|name| Cow::Owned(name)),
+            allow_empty,
+        )
+        .await?;
     let did_backup = retry_with_steps(
-        backup_steps
-            .start(take_snapshot, snapshot_name, allow_empty)
-            .await?,
-        backup_steps,
-        BackupStateSaver {
+        state,
+        &mut backup_steps,
+        &mut BackupStateSaver {
             backup_data_path: data_path.clone(),
-            backup_data_without_step: backup_data_without_step.clone(),
+            backup_data_without_step: backup_data.clone(),
         },
     )
     .await?;
-    if did_backup {
-        write_data(&data_path, &backup_data_without_step).await?;
+    if let Some(snapshot_name) = did_backup {
+        write_data(
+            &data_path,
+            &BackupData {
+                last_saved_snapshot_name: Some(snapshot_name),
+                ..backup_data.shallow_clone()
+            },
+        )
+        .await?;
     } else {
         println!("Did not take backup because there was nothing new to back up");
     }
@@ -136,29 +157,29 @@ pub async fn backup_continue_command(
     }: BackupContinueCommand,
 ) -> anyhow::Result<()> {
     let backup_config = get_config(&config_path).await?;
-    let backup_data = get_data(&data_path).await?;
-    match backup_data.backup_step {
+    let backup_data = Rc::new(get_data(&data_path).await?);
+    match &backup_data.backup_step {
         Some(backup_step) => {
-            let backup_data_without_step = BackupData {
-                backup_step: None,
-                ..backup_data
-            };
             retry_with_steps(
-                backup_step,
-                BackupSteps {
+                backup_step.shallow_clone(),
+                &mut BackupSteps {
                     config: backup_config,
-                    last_saved_snapshot_name: backup_data_without_step
-                        .last_saved_snapshot_name
-                        .clone(),
-                    s3_bucket: backup_data_without_step.s3_bucket.clone(),
+                    backup_data: backup_data.clone(),
                 },
-                BackupStateSaver {
+                &mut BackupStateSaver {
                     backup_data_path: data_path.clone(),
-                    backup_data_without_step: backup_data_without_step.clone(),
+                    backup_data_without_step: backup_data.clone(),
                 },
             )
             .await?;
-            write_data(&data_path, &backup_data_without_step).await?;
+            write_data(
+                &data_path,
+                &BackupData {
+                    backup_step: None,
+                    ..backup_data.shallow_clone()
+                },
+            )
+            .await?;
         }
         None => {
             Err(anyhow!("No backup in progress"))?;

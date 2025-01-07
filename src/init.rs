@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::fmt::Display;
 
 use aes_gcm::{Aes256Gcm, Key};
@@ -9,12 +10,12 @@ use crate::create_bucket::create_bucket;
 use crate::derive_key::{encrypt_immutable_key, generate_salt_and_derive_key};
 use crate::remote_hot_data::{upload_hot_data, EncryptionData, RemoteHotData};
 
-pub async fn init(
+pub async fn init<'a>(
     s3_client: &aws_sdk_s3::Client,
-    bucket_prefix: &impl Display,
+    bucket_prefix: &'a impl Display,
     location: &BucketLocationConstraint,
     encryption_password: &Option<Vec<u8>>,
-) -> anyhow::Result<BackupData> {
+) -> anyhow::Result<BackupData<'a>> {
     let bucket = create_bucket(s3_client, bucket_prefix, location).await?;
 
     let encryption_data =
@@ -46,8 +47,8 @@ pub async fn init(
             })?;
 
     let backup_data = BackupData {
-        s3_bucket: bucket,
-        s3_region: location.to_string(),
+        s3_bucket: Cow::Owned(bucket),
+        s3_region: Cow::Owned(location.to_string()),
         last_saved_snapshot_name: None,
         backup_step: None,
     };

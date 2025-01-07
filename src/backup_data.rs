@@ -1,61 +1,64 @@
+use std::borrow::Cow;
+
 use serde::{Deserialize, Serialize};
+use shallowclone::ShallowClone;
 
 use crate::{diff_or_first::DiffEntry, file_meta_data::FileMetaData};
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct BackupStepDiff {
-    pub snapshot_name: String,
+#[derive(Debug, Serialize, Deserialize, Clone, ShallowClone)]
+pub struct BackupStepDiff<'a> {
+    pub snapshot_name: Cow<'a, str>,
     pub allow_empty: bool,
 }
 
-impl BackupStepDiff {
-    pub fn next(self, diff: Vec<DiffEntry<Option<FileMetaData>>>) -> BackupStep {
+impl<'a> BackupStepDiff<'a> {
+    pub fn next(self, diff: Vec<DiffEntry<Option<FileMetaData>>>) -> BackupStep<'a> {
         BackupStep::Upload(BackupStepUpload {
             snapshot_name: self.snapshot_name,
-            diff,
+            diff: Cow::Owned(diff),
             uploaded_objects: 0,
         })
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct BackupStepUpload {
-    pub snapshot_name: String,
-    pub diff: Vec<DiffEntry<Option<FileMetaData>>>,
+#[derive(Debug, Serialize, Deserialize, Clone, ShallowClone)]
+pub struct BackupStepUpload<'a> {
+    pub snapshot_name: Cow<'a, str>,
+    pub diff: Cow<'a, Vec<DiffEntry<Option<FileMetaData>>>>,
     pub uploaded_objects: u64,
 }
 
-impl BackupStepUpload {
-    pub fn next(self) -> BackupStep {
+impl<'a> BackupStepUpload<'a> {
+    pub fn next(self) -> BackupStep<'a> {
         BackupStep::UpdateHotData(BackupStepUpdateHotData {
             snapshot_name: self.snapshot_name,
         })
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, ShallowClone)]
+pub struct BackupStepUpdateHotData<'a> {
+    pub snapshot_name: Cow<'a, str>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, ShallowClone)]
+pub enum BackupStep<'a> {
+    Diff(BackupStepDiff<'a>),
+    Upload(BackupStepUpload<'a>),
+    UpdateHotData(BackupStepUpdateHotData<'a>),
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct BackupStepUpdateHotData {
+pub struct BackupState<'a> {
     pub snapshot_name: String,
+    pub stage: BackupStep<'a>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub enum BackupStep {
-    Diff(BackupStepDiff),
-    Upload(BackupStepUpload),
-    UpdateHotData(BackupStepUpdateHotData),
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct BackupState {
-    pub snapshot_name: String,
-    pub stage: BackupStep,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct BackupData {
-    pub s3_bucket: String,
+#[derive(Debug, Serialize, Deserialize, Clone, ShallowClone)]
+pub struct BackupData<'a> {
+    pub s3_bucket: Cow<'a, str>,
     /// Idk if we will use this but it would be useful in case the region chances in the local AWS credentials / config file
-    pub s3_region: String,
-    pub last_saved_snapshot_name: Option<String>,
-    pub backup_step: Option<BackupStep>,
+    pub s3_region: Cow<'a, str>,
+    pub last_saved_snapshot_name: Option<Cow<'a, str>>,
+    pub backup_step: Option<BackupStep<'a>>,
 }
