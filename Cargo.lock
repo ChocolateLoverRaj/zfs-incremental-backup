@@ -36,6 +36,7 @@ dependencies = [
  "cfg-if",
  "cipher",
  "cpufeatures",
+ "zeroize",
 ]
 
 [[package]]
@@ -50,6 +51,18 @@ dependencies = [
  "ctr",
  "ghash",
  "subtle",
+]
+
+[[package]]
+name = "aes-gcm-stream"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d763ade72c376e5db452ec14f4c966fc907c036ef5cd2972a888e69fe2f811e5"
+dependencies = [
+ "aes",
+ "cipher",
+ "ghash",
+ "zeroize",
 ]
 
 [[package]]
@@ -3421,6 +3434,20 @@ name = "zeroize"
 version = "1.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ced3678a2879b30306d323f4542626697a464a97c0a07c9aebf7ebca65cd4dde"
+dependencies = [
+ "zeroize_derive",
+]
+
+[[package]]
+name = "zeroize_derive"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce36e65b0d2999d2aafac989fb249189a141aee1f53c612c1f37d72631959f69"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.91",
+]
 
 [[package]]
 name = "zerovec"
@@ -3448,7 +3475,9 @@ dependencies = [
 name = "zfs-incremental-backup"
 version = "0.1.0"
 dependencies = [
+ "aead",
  "aes-gcm",
+ "aes-gcm-stream",
  "anyhow",
  "argon2",
  "aws-config",

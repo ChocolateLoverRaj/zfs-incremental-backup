@@ -30,6 +30,7 @@ mod create_bucket;
 mod derive_key;
 mod diff_or_first;
 mod encryption_password;
+mod encryption_test;
 mod file_meta_data;
 mod get_config;
 mod get_data;
