@@ -57,7 +57,7 @@ pub async fn init<'a>(
         s3_client,
         &backup_data.s3_bucket,
         &RemoteHotData {
-            encryption: encryption_data,
+            encryption: encryption_data.map(|data| Cow::Owned(data)),
             snapshots: Default::default(),
         },
     )

@@ -6,6 +6,7 @@ use anyhow::Context;
 use argon2::password_hash::Salt;
 use aws_sdk_s3::{primitives::ByteStream, types::StorageClass};
 use serde::{Deserialize, Serialize};
+use shallowclone::ShallowClone;
 
 use crate::config::HOT_DATA_OBJECT_KEY;
 
@@ -15,9 +16,9 @@ pub struct EncryptionData {
     pub encrypted_immutable_key: Vec<u8>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, ShallowClone)]
 pub struct RemoteHotData<'a> {
-    pub encryption: Option<EncryptionData>,
+    pub encryption: Option<Cow<'a, EncryptionData>>,
     /// The names of the snapshots, as they appear as a S3 key.
     /// For example, a snapshot might be stored in the S3 objects `snapshots/<snapshot_name>/0`, `snapshots/<snapshot_name>/1`
     pub snapshots: Vec<Cow<'a, str>>,

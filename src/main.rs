@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::io::ErrorKind;
 use std::path::PathBuf;
 
@@ -37,7 +38,6 @@ mod get_data;
 mod init;
 mod read_dir_recursive;
 mod remote_hot_data;
-mod retry_steps;
 mod retry_steps_2;
 mod serde_file;
 mod sleep_with_spinner;
@@ -182,7 +182,7 @@ async fn main() -> anyhow::Result<()> {
                     let mut remote_hot_data =
                         download_hot_data(&s3_client, &backup_data.s3_bucket).await?;
                     let decrypted_immutable_key =
-                        decrypt_immutable_key(&encryption_password, &remote_hot_data.encryption.ok_or(anyhow!("The local config specifies an encryption password, but the remote data is not encrypted."))?)?;
+                        decrypt_immutable_key(&encryption_password, remote_hot_data.encryption.as_deref().ok_or(anyhow!("The local config specifies an encryption password, but the remote data is not encrypted."))?)?;
 
                     let mut term = Term::default();
                     let mut theme = MinimalTheme::default();
@@ -210,10 +210,10 @@ async fn main() -> anyhow::Result<()> {
                         generate_salt_and_derive_key(new_password.as_bytes())?;
                     let encrypted_immutable_key =
                         encrypt_immutable_key(&new_derived_key, &decrypted_immutable_key)?;
-                    remote_hot_data.encryption = Some(EncryptionData {
+                    remote_hot_data.encryption = Some(Cow::Owned(EncryptionData {
                         password_derived_key_salt: new_salt,
                         encrypted_immutable_key,
-                    });
+                    }));
                     upload_hot_data(&s3_client, &backup_data.s3_bucket, &remote_hot_data).await?;
                     println!("Changed encryption password. Make sure to update your config to use the new password because the previous password will not work. You can use `check-password` to check it.");
                 }

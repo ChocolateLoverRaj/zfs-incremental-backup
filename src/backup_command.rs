@@ -1,6 +1,7 @@
 use std::{borrow::Cow, path::PathBuf, rc::Rc};
 
 use anyhow::anyhow;
+use aws_config::BehaviorVersion;
 use clap::{Parser, Subcommand};
 use shallowclone::ShallowClone;
 
@@ -9,6 +10,7 @@ use crate::{
     backup_steps::BackupSteps,
     get_config::get_config,
     get_data::{get_data, write_data},
+    remote_hot_data::download_hot_data,
     retry_steps_2::{retry_with_steps_2, StateSaver2},
 };
 
@@ -109,12 +111,16 @@ pub async fn backup_start_command(
             "Failed backup in progress. Use the continue command to continue in progress backup."
         ))?;
     }
-    // Note that this only checks the last saved snapshot and there could still be backups that are already uploaded
-    if backup_data.last_saved_snapshot_name.is_some()
-        && backup_data.last_saved_snapshot_name.as_deref() == snapshot_name.as_deref()
-    {
-        Err(anyhow!("Already saved a snapshot with that name"))?;
-    }
+
+    let hot_data = download_hot_data(
+        &{
+            let sdk_config = aws_config::defaults(BehaviorVersion::latest()).load().await;
+            let s3_client = aws_sdk_s3::Client::new(&sdk_config);
+            s3_client
+        },
+        &backup_data.s3_bucket,
+    )
+    .await?;
     let mut backup_steps = BackupSteps {
         config: backup_config,
         backup_data: backup_data.clone(),
@@ -124,6 +130,7 @@ pub async fn backup_start_command(
             take_snapshot,
             snapshot_name.map(|name| Cow::Owned(name)),
             allow_empty,
+            hot_data,
         )
         .await?;
     let did_backup = retry_with_steps_2(
