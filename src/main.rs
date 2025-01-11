@@ -14,6 +14,7 @@ mod check_password_command;
 mod chunks_stream;
 mod config;
 mod create_bucket;
+mod create_immutable_key;
 mod decrypt_immutable_key;
 mod derive_key;
 mod diff_or_first;

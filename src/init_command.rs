@@ -11,6 +11,7 @@ use tokio::{fs::OpenOptions, io::AsyncWriteExt};
 use crate::{
     backup_data::BackupData,
     create_bucket::create_bucket,
+    create_immutable_key::create_immutable_key,
     derive_key::{encrypt_immutable_key, generate_salt_and_derive_key},
     get_config::get_config,
     remote_hot_data::{upload_hot_data, EncryptionData, RemoteHotDataDecrypted},
@@ -67,11 +68,7 @@ pub async fn init_command(
             // println!("Encryption password: {:?}", encryption_password);
 
             // We will create an encryption key randomly
-            let immutable_key = {
-                let mut immutable_key = Key::<Aes256Gcm>::default();
-                thread_rng().fill(immutable_key.as_mut_slice());
-                immutable_key
-            };
+            let immutable_key = create_immutable_key();
             // println!("Immutable key: {:?}", immutable_key);
             // We will also create a key derived from the password, along with a random salt
             let (password_derived_key_salt, password_derived_key) =

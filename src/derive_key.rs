@@ -23,11 +23,14 @@ pub fn generate_salt_and_derive_key(
 pub fn encrypt_immutable_key(
     password_derived_key: &Key<Aes256Gcm>,
     unencrypted_immutable_key: &[u8],
-) -> anyhow::Result<Vec<u8>> {
+) -> anyhow::Result<[u8; 32 + 16]> {
     let cipher = Aes256Gcm::new(password_derived_key);
     let nonce = Nonce::default();
     let encrypted_immutable_key = cipher
         .encrypt(&nonce, unencrypted_immutable_key)
-        .map_err(|e| anyhow!("Failed to encrypt: {e:?}"))?;
+        .map_err(|e| anyhow!("Failed to encrypt: {e:?}"))?
+        .try_into()
+        // It should always be the right size
+        .unwrap();
     Ok(encrypted_immutable_key)
 }

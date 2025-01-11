@@ -2,23 +2,25 @@
 
 use std::borrow::Cow;
 
+use crate::{
+    backup_config::BackupConfig, config::HOT_DATA_OBJECT_KEY,
+    decrypt_immutable_key::decrypt_immutable_key,
+};
 use aead::{AeadMutInPlace, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};
 use anyhow::{anyhow, Context};
 use argon2::password_hash::Salt;
 use aws_sdk_s3::{primitives::ByteStream, types::StorageClass};
 use serde::{Deserialize, Serialize};
+use serde_big_array::BigArray;
 use shallowclone::ShallowClone;
-
-use crate::{
-    backup_config::BackupConfig, config::HOT_DATA_OBJECT_KEY,
-    decrypt_immutable_key::decrypt_immutable_key,
-};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct EncryptionData {
     pub password_derived_key_salt: [u8; Salt::RECOMMENDED_LENGTH],
-    pub encrypted_immutable_key: Vec<u8>,
+    /// 32 bytes for the key, plus 16 bytes for aes-256-gcm tag
+    #[serde(with = "BigArray")]
+    pub encrypted_immutable_key: [u8; 32 + 16],
 }
 
 pub type Snapshots<'a> = Vec<Cow<'a, str>>;
