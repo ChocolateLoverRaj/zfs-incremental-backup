@@ -1,4 +1,4 @@
-use std::{borrow::Cow, io, ops::Deref, rc::Rc, time::Duration};
+use std::{borrow::Cow, ops::Deref, rc::Rc, sync::Arc, time::Duration};
 
 use anyhow::anyhow;
 use aws_config::BehaviorVersion;
@@ -16,7 +16,8 @@ use crate::{
     backup_data::{BackupData, BackupStep, BackupStepDiff},
     chunks_stream::{ChunksStreamExt, ChunksStreamOfStreams},
     config::{ENCRYPTION_CHUNK_SIZE, MAX_OBJECT_SIZE, SNAPSHOTS_PREFIX},
-    diff_or_first::{diff_or_first, FileType},
+    diff_entry::FileType,
+    diff_or_first::diff_or_first,
     encrypt_stream::EncryptStream,
     get_hasher::get_hasher,
     remote_hot_data::{download_hot_data, upload_hot_data, RemoteHotDataDecrypted},
@@ -122,6 +123,14 @@ impl<'a> StepDoer2<M, BackupStep<'a>, Option<Cow<'a, str>>, anyhow::Error, anyho
             BackupStep::Diff(backup_step_diff) => {
                 // TODO: When scanning files for the first snapshot, we could continue where we left off if we fail
                 println!("Diffing...");
+                let mounted_snapshot_path = Arc::new(
+                    zfs_snapshot_mount_get(
+                        &self.config.zfs_dataset_name,
+                        &backup_step_diff.snapshot_name,
+                    )
+                    .await?
+                    .ok_or(anyhow!("Not mounted"))?,
+                );
                 let diff = stream::iter(
                     diff_or_first(
                         &self.config.zfs_dataset_name,
@@ -132,20 +141,25 @@ impl<'a> StepDoer2<M, BackupStep<'a>, Option<Cow<'a, str>>, anyhow::Error, anyho
                     .into_iter(),
                 )
                 .flat_map_unordered(None, |diff_entry| {
-                    let path = diff_entry.path.clone();
+                    let path = Arc::new(diff_entry.path.clone());
                     let file_type = diff_entry.file_type;
+                    let mounted_snapshot_path = mounted_snapshot_path.clone();
                     diff_entry
                         .try_map_async(move |option| {
                             {
                                 let value = path.clone();
+                                let mounted_snapshot_path = mounted_snapshot_path.clone();
                                 async move {
-                                    Ok::<_, io::Error>(match option {
+                                    Ok::<_, anyhow::Error>(match option {
                                         Some(len) => Some((&len).into()),
                                         None => match file_type {
                                             FileType::RegularFile => {
                                                 // TODO: Save metadata progress so retries don't need to get all the metadata again
                                                 Some(
-                                                    (&tokio::fs::metadata(value.clone()).await?)
+                                                    (&tokio::fs::metadata(
+                                                        mounted_snapshot_path.join(value.deref()),
+                                                    )
+                                                    .await?)
                                                         .into(),
                                                 )
                                             }
@@ -267,7 +281,6 @@ impl<'a> StepDoer2<M, BackupStep<'a>, Option<Cow<'a, str>>, anyhow::Error, anyho
                                                 if unused != &[0] {
                                                     Err(anyhow!("Ran out of unique nonces"))
                                                 } else {
-                                                    println!("Nonce: {nonce:x?}");
                                                     Ok(nonce.try_into().unwrap())
                                                 }
                                             }?,

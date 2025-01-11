@@ -17,6 +17,7 @@ mod create_bucket;
 mod create_immutable_key;
 mod decrypt_immutable_key;
 mod derive_key;
+mod diff_entry;
 mod diff_or_first;
 mod encrypt_stream;
 mod encryption_password;

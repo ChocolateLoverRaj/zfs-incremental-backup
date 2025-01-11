@@ -5,7 +5,7 @@ use futures::{stream, FutureExt, Stream, StreamExt, TryFutureExt};
 use tokio::{fs::File, io::AsyncSeekExt};
 use tokio_util::io::ReaderStream;
 
-use crate::{diff_or_first::DiffEntry, file_meta_data::FileMetaData};
+use crate::{diff_entry::DiffEntry, file_meta_data::FileMetaData};
 
 pub fn snapshot_upload_stream(
     mount_point: PathBuf,

@@ -3,7 +3,7 @@ use std::borrow::Cow;
 use serde::{Deserialize, Serialize};
 use shallowclone::ShallowClone;
 
-use crate::{diff_or_first::DiffEntry, file_meta_data::FileMetaData};
+use crate::{diff_entry::DiffEntry, file_meta_data::FileMetaData};
 
 #[derive(Debug, Serialize, Deserialize, Clone, ShallowClone)]
 pub struct BackupStepDiff<'a> {

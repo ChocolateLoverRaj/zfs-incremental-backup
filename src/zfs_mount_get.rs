@@ -25,9 +25,11 @@ pub async fn zfs_snapshot_mount_get(
 ) -> anyhow::Result<Option<PathBuf>> {
     Ok(zfs_mount_get(dataset)
         .await?
-        .map(|mut dataset_mount_point| {
-            dataset_mount_point.push(".zfs/snapshot");
-            dataset_mount_point.push(snapshot);
-            dataset_mount_point
-        }))
+        .map(|dataset_mount_point| zfs_get_snapshot_path(dataset_mount_point, snapshot)))
+}
+
+pub fn zfs_get_snapshot_path(mut zfs_path: PathBuf, snapshot: &str) -> PathBuf {
+    zfs_path.push(".zfs/snapshot");
+    zfs_path.push(snapshot);
+    zfs_path
 }
