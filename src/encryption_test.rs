@@ -98,6 +98,70 @@ mod test {
     }
 
     #[test]
+    pub fn encrypt_and_decrypt_block_stream_2() {
+        // The encryption key can be generated randomly:
+        let key = Aes256Gcm::generate_key(OsRng);
+
+        let cipher = Aes256Gcm::new(&key);
+        let plaintext = b"plaintext message";
+
+        fn print_bytes(message: impl Display, bytes: &[u8]) {
+            println!(
+                "{}: {:?} {:x?} {}",
+                message,
+                String::from_utf8(bytes.to_vec()),
+                bytes,
+                bytes.len()
+            );
+        }
+
+        print_bytes("plaintext", plaintext);
+        let nonce = [0u8; 7];
+        const CHUNK_SIZE: usize = 1;
+        let ciphertext = {
+            let mut ciphertext = Vec::default();
+            let mut encryptor = EncryptorBE32::from_aead(cipher.clone(), nonce.as_ref().into());
+            let total_chunks = plaintext.len().div_ceil(CHUNK_SIZE);
+            for i in 0..total_chunks - 1 {
+                ciphertext.append(
+                    &mut encryptor
+                        .encrypt_next(&plaintext[i * CHUNK_SIZE..(i + 1) * CHUNK_SIZE])
+                        .unwrap(),
+                );
+            }
+            ciphertext.append(
+                &mut encryptor
+                    .encrypt_last(&plaintext[(total_chunks - 1) * CHUNK_SIZE..])
+                    .unwrap(),
+            );
+            ciphertext
+        };
+        print_bytes("ciphertext", &ciphertext);
+
+        let decrypted = {
+            let mut decrypted = Vec::default();
+            let mut decryptor = DecryptorBE32::from_aead(cipher, nonce.as_ref().into());
+            let total_chunks = ciphertext.len().div_ceil(CHUNK_SIZE + 16);
+            for i in 0..total_chunks - 1 {
+                decrypted.append(
+                    &mut decryptor
+                        .decrypt_next(
+                            &ciphertext[i * (CHUNK_SIZE + 16)..(i + 1) * (CHUNK_SIZE + 16)],
+                        )
+                        .unwrap(),
+                );
+            }
+            decrypted.append(
+                &mut decryptor
+                    .decrypt_last(&ciphertext[(total_chunks - 1) * (CHUNK_SIZE + 16)..])
+                    .unwrap(),
+            );
+            decrypted
+        };
+        print_bytes("plaintext", &decrypted);
+    }
+
+    #[test]
     pub fn encrypt_and_decrypt_stream() {
         let key = [0x42; 32];
         let nonce = [0x24; 12];

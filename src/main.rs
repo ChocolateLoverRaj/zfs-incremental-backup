@@ -10,11 +10,11 @@ mod backup_config;
 mod backup_data;
 mod backup_steps;
 mod change_password_command;
-mod check_key;
 mod check_password_command;
 mod chunks_stream;
 mod config;
 mod create_bucket;
+mod decrypt_immutable_key;
 mod derive_key;
 mod diff_or_first;
 mod encryption_password;
@@ -22,7 +22,6 @@ mod encryption_test;
 mod file_meta_data;
 mod get_config;
 mod get_data;
-mod init;
 mod init_command;
 mod read_dir_recursive;
 mod remote_hot_data;
@@ -42,7 +41,6 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// does testing things
     Init(InitCommand),
     Backup {
         #[command(subcommand)]

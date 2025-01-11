@@ -5,7 +5,7 @@ use aws_config::BehaviorVersion;
 use clap::Parser;
 
 use crate::{
-    check_key::decrypt_immutable_key, get_config::get_config, get_data::get_data,
+    decrypt_immutable_key::decrypt_immutable_key, get_config::get_config, get_data::get_data,
     remote_hot_data::download_hot_data,
 };
 
@@ -29,7 +29,7 @@ pub async fn check_password_command(
     let backup_data = get_data(data_path).await?;
     let sdk_config = aws_config::defaults(BehaviorVersion::latest()).load().await;
     let s3_client = aws_sdk_s3::Client::new(&sdk_config);
-    let remote_hot_data = download_hot_data(&s3_client, &backup_data.s3_bucket).await?;
+    let remote_hot_data = download_hot_data(&config, &s3_client, &backup_data.s3_bucket).await?;
     match remote_hot_data.encryption {
         Some(encryption) => match config.encryption {
             Some(encryption_config) => {

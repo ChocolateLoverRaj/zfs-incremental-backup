@@ -1,11 +1,20 @@
-use std::{io::ErrorKind, path::PathBuf};
+use std::{borrow::Cow, io::ErrorKind, path::PathBuf};
 
+use aead::Key;
+use aes_gcm::Aes256Gcm;
 use aws_config::BehaviorVersion;
 use aws_sdk_s3::types::BucketLocationConstraint;
 use clap::Parser;
+use rand::{thread_rng, Rng};
 use tokio::{fs::OpenOptions, io::AsyncWriteExt};
 
-use crate::{get_config::get_config, init::init};
+use crate::{
+    backup_data::BackupData,
+    create_bucket::create_bucket,
+    derive_key::{encrypt_immutable_key, generate_salt_and_derive_key},
+    get_config::get_config,
+    remote_hot_data::{upload_hot_data, EncryptionData, RemoteHotDataDecrypted},
+};
 
 #[derive(Parser)]
 pub struct InitCommand {
@@ -50,13 +59,50 @@ pub async fn init_command(
     let config = get_config(config_path).await?;
     let sdk_config = aws_config::defaults(BehaviorVersion::latest()).load().await;
     let s3_client = aws_sdk_s3::Client::new(&sdk_config);
-    let backup_data = init(
+    let bucket = create_bucket(&s3_client, &bucket_prefix, &region).await?;
+
+    let encryption_data = match &config.encryption {
+        None => anyhow::Ok(None),
+        Some(encryption_config) => {
+            // println!("Encryption password: {:?}", encryption_password);
+
+            // We will create an encryption key randomly
+            let immutable_key = {
+                let mut immutable_key = Key::<Aes256Gcm>::default();
+                thread_rng().fill(immutable_key.as_mut_slice());
+                immutable_key
+            };
+            // println!("Immutable key: {:?}", immutable_key);
+            // We will also create a key derived from the password, along with a random salt
+            let (password_derived_key_salt, password_derived_key) =
+                generate_salt_and_derive_key(&encryption_config.password.get_bytes().await?)?;
+            // println!("password_derived_key_salt: {:?}", password_derived_key_salt);
+            // println!("password_derived_key: {:?}", password_derived_key);
+            // We will then encrypt the encryption key itself using the password
+            let encrypted_immutable_key =
+                encrypt_immutable_key(&password_derived_key, immutable_key.as_slice())?;
+            // println!("encrypted_immutable_key: {:?}", encrypted_immutable_key);
+            Ok(Some(EncryptionData {
+                password_derived_key_salt,
+                encrypted_immutable_key,
+            }))
+        }
+    }?;
+
+    let backup_data = BackupData {
+        s3_bucket: Cow::Owned(bucket),
+        s3_region: Cow::Owned(region.to_string()),
+        last_saved_snapshot_name: None,
+        backup_step: None,
+    };
+
+    upload_hot_data(
+        &config,
         &s3_client,
-        &bucket_prefix,
-        &region,
-        &match &config.encryption {
-            Some(encryption_config) => Some(encryption_config.password.get_bytes().await?),
-            None => None,
+        &backup_data.s3_bucket,
+        &RemoteHotDataDecrypted {
+            encryption: encryption_data.map(|data| Cow::Owned(data)),
+            snapshots: Default::default(),
         },
     )
     .await?;

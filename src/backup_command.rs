@@ -112,25 +112,23 @@ pub async fn backup_start_command(
         ))?;
     }
 
-    let hot_data = download_hot_data(
-        &{
-            let sdk_config = aws_config::defaults(BehaviorVersion::latest()).load().await;
-            let s3_client = aws_sdk_s3::Client::new(&sdk_config);
-            s3_client
-        },
-        &backup_data.s3_bucket,
-    )
-    .await?;
+    let s3_client = {
+        let sdk_config = aws_config::defaults(BehaviorVersion::latest()).load().await;
+        let s3_client = aws_sdk_s3::Client::new(&sdk_config);
+        s3_client
+    };
+    let hot_data = download_hot_data(&backup_config, &s3_client, &backup_data.s3_bucket).await?;
     let mut backup_steps = BackupSteps {
         config: backup_config,
         backup_data: backup_data.clone(),
+        remote_hot_data: Some(hot_data),
     };
     let state = backup_steps
         .start(
             take_snapshot,
             snapshot_name.map(|name| Cow::Owned(name)),
             allow_empty,
-            hot_data,
+            &s3_client,
         )
         .await?;
     let did_backup = retry_with_steps_2(
@@ -175,6 +173,7 @@ pub async fn backup_continue_command(
                 &mut BackupSteps {
                     config: backup_config,
                     backup_data: backup_data.clone(),
+                    remote_hot_data: None,
                 },
                 &mut BackupStateSaver {
                     backup_data_path: data_path.clone(),

@@ -16,7 +16,7 @@ use crate::{
     chunks_stream::{ChunksStreamExt, ChunksStreamOfStreams},
     config::SNAPSHOTS_PREFIX,
     diff_or_first::{diff_or_first, FileType},
-    remote_hot_data::{upload_hot_data, RemoteHotData},
+    remote_hot_data::{download_hot_data, upload_hot_data, RemoteHotDataDecrypted},
     retry_steps_2::{RetryStepNotFinished2, RetryStepOutput2, StepDoer2},
     sleep_with_spinner::sleep_with_spinner,
     snapshot_upload_stream_2::snapshot_upload_stream,
@@ -27,15 +27,17 @@ use crate::{
 pub struct BackupSteps<'a> {
     pub config: BackupConfig,
     pub backup_data: Rc<BackupData<'a>>,
+    pub remote_hot_data: Option<RemoteHotDataDecrypted<'a>>,
 }
 
 impl<'a> BackupSteps<'a> {
     pub async fn start<'b>(
-        &self,
+        &mut self,
         take_snapshot: bool,
         snapshot_name: Option<Cow<'b, str>>,
         allow_empty: bool,
-        hot_data: RemoteHotData<'b>,
+        s3_client: &aws_sdk_s3::Client,
+        // hot_data: RemoteHotDataDecrypted<'b>,
     ) -> anyhow::Result<RetryStepNotFinished2<M, BackupStep<'b>>> {
         let snapshot_name = if take_snapshot {
             // Don't backup more than once a second please. It won't work.
@@ -52,6 +54,7 @@ impl<'a> BackupSteps<'a> {
                 "Must specify a snapshot name, or use --take-snapshot"
             ))?
         };
+        let hot_data = self.take_remote_hot_data(s3_client).await?;
         match hot_data
             .snapshots
             .iter()
@@ -61,14 +64,30 @@ impl<'a> BackupSteps<'a> {
             None => Ok(()),
             Some(name) => Err(anyhow!("Snapshot with name {:?} already saved", name)),
         }?;
+        self.remote_hot_data = Some(hot_data);
         // TODO: Handle crashing between taking snapshot and saving state. If we don't, then there could be unused snapshots
         Ok(RetryStepNotFinished2 {
             memory_data: None,
             persistent_data: BackupStep::Diff(BackupStepDiff {
                 snapshot_name,
                 allow_empty,
-                hot_data,
+                // hot_data,
             }),
+        })
+    }
+
+    async fn take_remote_hot_data(
+        &mut self,
+        s3_client: &aws_sdk_s3::Client,
+    ) -> anyhow::Result<RemoteHotDataDecrypted<'a>> {
+        Ok({
+            let remote_hot_data = match self.remote_hot_data.take() {
+                Some(remote_hot_data) => remote_hot_data,
+                None => {
+                    download_hot_data(&self.config, s3_client, &self.backup_data.s3_bucket).await?
+                }
+            };
+            remote_hot_data
         })
     }
 }
@@ -285,25 +304,28 @@ impl<'a> StepDoer2<M, BackupStep<'a>, Option<Cow<'a, str>>, anyhow::Error, anyho
                 let s3_client = aws_sdk_s3::Client::new(&sdk_config);
                 let snapshot_name = backup_step_upload_hot_data.snapshot_name;
                 // Only update if we have to
-                if backup_step_upload_hot_data
-                    .hot_data
+                let remote_hot_data = self.take_remote_hot_data(&s3_client).await?;
+                if remote_hot_data
                     .snapshots
                     .last()
                     .map(|snapshot| snapshot.deref())
                     != Some(snapshot_name.deref())
                 {
-                    let new_hot_data = RemoteHotData {
+                    let new_hot_data = RemoteHotDataDecrypted {
                         snapshots: {
-                            let mut s = backup_step_upload_hot_data
-                                .hot_data
-                                .snapshots
-                                .shallow_clone();
+                            let mut s = remote_hot_data.snapshots.shallow_clone();
                             s.push(snapshot_name.shallow_clone());
                             s
                         },
-                        ..backup_step_upload_hot_data.hot_data
+                        ..remote_hot_data
                     };
-                    upload_hot_data(&s3_client, &self.backup_data.s3_bucket, &new_hot_data).await?;
+                    upload_hot_data(
+                        &self.config,
+                        &s3_client,
+                        &self.backup_data.s3_bucket,
+                        &new_hot_data,
+                    )
+                    .await?;
                 }
                 spinner.stop_with_newline();
                 Ok(RetryStepOutput2::Finished(Some(snapshot_name)))
