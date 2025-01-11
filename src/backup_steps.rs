@@ -16,6 +16,7 @@ use crate::{
     chunks_stream::{ChunksStreamExt, ChunksStreamOfStreams},
     config::SNAPSHOTS_PREFIX,
     diff_or_first::{diff_or_first, FileType},
+    get_hasher::get_hasher,
     remote_hot_data::{download_hot_data, upload_hot_data, RemoteHotDataDecrypted},
     retry_steps_2::{RetryStepNotFinished2, RetryStepOutput2, StepDoer2},
     sleep_with_spinner::sleep_with_spinner,
@@ -54,7 +55,7 @@ impl<'a> BackupSteps<'a> {
                 "Must specify a snapshot name, or use --take-snapshot"
             ))?
         };
-        let hot_data = self.take_remote_hot_data(s3_client).await?;
+        let hot_data = self.get_remote_hot_data(s3_client).await?;
         match hot_data
             .snapshots
             .iter()
@@ -64,7 +65,6 @@ impl<'a> BackupSteps<'a> {
             None => Ok(()),
             Some(name) => Err(anyhow!("Snapshot with name {:?} already saved", name)),
         }?;
-        self.remote_hot_data = Some(hot_data);
         // TODO: Handle crashing between taking snapshot and saving state. If we don't, then there could be unused snapshots
         Ok(RetryStepNotFinished2 {
             memory_data: None,
@@ -88,6 +88,17 @@ impl<'a> BackupSteps<'a> {
                 }
             };
             remote_hot_data
+        })
+    }
+
+    /// Get the remote hot data, downloading it if it is `None`
+    async fn get_remote_hot_data(
+        &mut self,
+        s3_client: &aws_sdk_s3::Client,
+    ) -> anyhow::Result<&mut RemoteHotDataDecrypted<'a>> {
+        Ok({
+            let remote_hot_data = self.take_remote_hot_data(s3_client).await?;
+            self.remote_hot_data.insert(remote_hot_data)
         })
     }
 }
@@ -246,12 +257,39 @@ impl<'a> StepDoer2<M, BackupStep<'a>, Option<Cow<'a, str>>, anyhow::Error, anyho
                         // TODO: Deep Archive
                         .storage_class(StorageClass::Standard)
                         .bucket(self.backup_data.s3_bucket.as_ref())
-                        .key(format!(
-                            "{}/{}/{}",
-                            SNAPSHOTS_PREFIX,
-                            backup_step_upload.snapshot_name,
-                            backup_step_upload.uploaded_objects
-                        ))
+                        .key({
+                            let snapshot_name = {
+                                match &self.config.encryption {
+                                    Some(encryption_config) => {
+                                        if encryption_config.encrypt_snapshot_names {
+                                            let encryption_data = self
+                                                .remote_hot_data
+                                                .as_ref()
+                                                .ok_or(anyhow!("No remote hot data"))?
+                                                .encryption
+                                                .as_deref()
+                                                .ok_or(anyhow!("No encryption data"))?;
+                                            &get_hasher(
+                                                &encryption_config.password.get_bytes().await?,
+                                                encryption_data,
+                                            )?
+                                            .update(backup_step_upload.snapshot_name.as_bytes())
+                                            .finalize()
+                                            .to_string()
+                                        } else {
+                                            backup_step_upload.snapshot_name.as_ref()
+                                        }
+                                    }
+                                    None => backup_step_upload.snapshot_name.as_ref(),
+                                }
+                            };
+                            format!(
+                                "{}/{}/{}",
+                                SNAPSHOTS_PREFIX,
+                                snapshot_name,
+                                backup_step_upload.uploaded_objects
+                            )
+                        })
                         .if_none_match("*")
                         .content_length(object_len as i64)
                         .body({
