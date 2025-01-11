@@ -4,6 +4,7 @@ use anyhow::anyhow;
 use aws_config::BehaviorVersion;
 use aws_sdk_s3::{error::SdkError, primitives::ByteStream, types::StorageClass};
 use bytes::Bytes;
+use bytes_stream::BytesStream;
 use chrono::Utc;
 use futures::{stream, FutureExt, StreamExt, TryStreamExt};
 use humansize::{format_size, DECIMAL};
@@ -14,8 +15,9 @@ use crate::{
     backup_config::BackupConfig,
     backup_data::{BackupData, BackupStep, BackupStepDiff},
     chunks_stream::{ChunksStreamExt, ChunksStreamOfStreams},
-    config::SNAPSHOTS_PREFIX,
+    config::{ENCRYPTION_CHUNK_SIZE, MAX_OBJECT_SIZE, SNAPSHOTS_PREFIX},
     diff_or_first::{diff_or_first, FileType},
+    encrypt_stream::EncryptStream,
     get_hasher::get_hasher,
     remote_hot_data::{download_hot_data, upload_hot_data, RemoteHotDataDecrypted},
     retry_steps_2::{RetryStepNotFinished2, RetryStepOutput2, StepDoer2},
@@ -103,7 +105,7 @@ impl<'a> BackupSteps<'a> {
     }
 }
 
-type M = Option<ChunksStreamOfStreams<'static, io::Result<Bytes>>>;
+type M = Option<ChunksStreamOfStreams<'static, anyhow::Result<Bytes>>>;
 
 impl<'a> StepDoer2<M, BackupStep<'a>, Option<Cow<'a, str>>, anyhow::Error, anyhow::Error>
     for BackupSteps<'a>
@@ -171,7 +173,7 @@ impl<'a> StepDoer2<M, BackupStep<'a>, Option<Cow<'a, str>>, anyhow::Error, anyho
                 }
             }
             BackupStep::Upload(mut backup_step_upload) => {
-                let snapshot_upload_size = backup_step_upload.diff.iter().try_fold(0, |sum, diff_entry| {
+                let unencrypted_size = backup_step_upload.diff.iter().try_fold(0, |sum, diff_entry| {
                     let postcard_len = postcard::to_allocvec(diff_entry)?.len() as u64;
                     anyhow::Ok(
                         sum
@@ -183,17 +185,23 @@ impl<'a> StepDoer2<M, BackupStep<'a>, Option<Cow<'a, str>>, anyhow::Error, anyho
                                 + diff_entry.diff_type.content_data().copied().flatten().map_or(0, |file_meta_data| file_meta_data.len),
                     )
                 })?;
+                let snapshot_upload_size = {
+                    match self.config.encryption {
+                        None => unencrypted_size,
+                        Some(_) => {
+                            // Each encryption chunk has 16 extra bytes
+                            unencrypted_size
+                                + unencrypted_size.div_ceil(ENCRYPTION_CHUNK_SIZE as u64) * 16
+                        }
+                    }
+                };
 
                 // TODO: We could save space by not including the full path
                 // TODO: Maybe upload smaller files or use multipart upload in case 5GB uploads fail
                 let sdk_config = aws_config::defaults(BehaviorVersion::latest()).load().await;
                 let s3_client = aws_sdk_s3::Client::new(&sdk_config);
 
-                // 5GB, in bytes
-                // let max_object_size: u64 = 5 * 1000 * 1000 * 1000;
-                let max_object_size: u64 = 50;
-
-                let total_objects_count = snapshot_upload_size.div_ceil(max_object_size).max(
+                let total_objects_count = snapshot_upload_size.div_ceil(MAX_OBJECT_SIZE).max(
                     match self.config.create_empty_objects {
                         true => 1,
                         false => 0,
@@ -222,28 +230,63 @@ impl<'a> StepDoer2<M, BackupStep<'a>, Option<Cow<'a, str>>, anyhow::Error, anyho
                 {
                     let snapshot_upload_stream: ChunksStreamOfStreams<
                         'static,
-                        Result<Bytes, io::Error>,
+                        Result<Bytes, anyhow::Error>,
                     > = match memory_data {
                         Some(snapshot_upload_stream) => snapshot_upload_stream,
-                        None => snapshot_upload_stream(
-                            zfs_snapshot_mount_get(
-                                &self.config.zfs_dataset_name,
-                                &backup_step_upload.snapshot_name,
+                        None => {
+                            let stream = snapshot_upload_stream(
+                                zfs_snapshot_mount_get(
+                                    &self.config.zfs_dataset_name,
+                                    &backup_step_upload.snapshot_name,
+                                )
+                                .await?
+                                .ok_or(anyhow!("No zfs mountpoint"))?,
+                                // Unfortunately we have to clone the whole thing
+                                backup_step_upload.diff.shallow_clone().into_owned(),
+                                backup_step_upload.uploaded_objects * MAX_OBJECT_SIZE,
                             )
-                            .await?
-                            .ok_or(anyhow!("No zfs mountpoint"))?,
-                            // Unfortunately we have to clone the whole thing
-                            backup_step_upload.diff.shallow_clone().into_owned(),
-                            backup_step_upload.uploaded_objects * max_object_size,
-                        )
+                            .map_err(|e| anyhow::Error::from(e));
+                            match &self.config.encryption {
+                                Some(encryption_config) => {
+                                    let password = encryption_config.password.get_bytes().await?;
+                                    let remote_hot_data =
+                                        self.take_remote_hot_data(&s3_client).await?;
+                                    stream
+                                        .try_bytes_chunks(ENCRYPTION_CHUNK_SIZE)
+                                        .encrypt(
+                                            password,
+                                            remote_hot_data
+                                                .encryption
+                                                .ok_or(anyhow!("No encryption data"))?
+                                                .into_owned(),
+                                            {
+                                                let bytes = (remote_hot_data.snapshots.len()
+                                                    as u64)
+                                                    .to_be_bytes();
+                                                let (unused, nonce) = bytes.split_at(1);
+                                                if unused != &[0] {
+                                                    Err(anyhow!("Ran out of unique nonces"))
+                                                } else {
+                                                    println!("Nonce: {nonce:x?}");
+                                                    Ok(nonce.try_into().unwrap())
+                                                }
+                                            }?,
+                                            (unencrypted_size as usize)
+                                                .div_ceil(ENCRYPTION_CHUNK_SIZE),
+                                        )?
+                                        .boxed()
+                                }
+                                None => stream.boxed(),
+                            }
+                        }
                         .try_chunks_streams(),
                     };
 
                     // For testing interrupted uploading
                     sleep_with_spinner(Duration::from_secs(3)).await;
                     let object_len = (snapshot_upload_size
-                        - backup_step_upload.uploaded_objects * max_object_size)
-                        .min(max_object_size);
+                        - backup_step_upload.uploaded_objects * MAX_OBJECT_SIZE)
+                        .min(MAX_OBJECT_SIZE);
                     let mut spinner = Spinner::with_timer(
                         Spinners::Dots,
                         format!(
@@ -294,7 +337,7 @@ impl<'a> StepDoer2<M, BackupStep<'a>, Option<Cow<'a, str>>, anyhow::Error, anyho
                         .content_length(object_len as i64)
                         .body({
                             ByteStream::from_body_1_x(reqwest::Body::wrap_stream(
-                                snapshot_upload_stream.take_bytes_stream(max_object_size as usize),
+                                snapshot_upload_stream.take_bytes_stream(MAX_OBJECT_SIZE as usize),
                             ))
                         })
                         .send()

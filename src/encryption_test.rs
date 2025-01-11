@@ -162,7 +162,7 @@ mod test {
     }
 
     #[test]
-    pub fn encrypt_and_decrypt_stream() {
+    pub fn encrypt_and_decrypt_stream_chacha20() {
         let key = [0x42; 32];
         let nonce = [0x24; 12];
         let plaintext = b"Rust is fun";

@@ -18,6 +18,7 @@ mod create_immutable_key;
 mod decrypt_immutable_key;
 mod derive_key;
 mod diff_or_first;
+mod encrypt_stream;
 mod encryption_password;
 mod encryption_test;
 mod file_meta_data;
