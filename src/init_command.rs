@@ -1,20 +1,16 @@
 use std::{borrow::Cow, io::ErrorKind, path::PathBuf};
 
-use aead::Key;
-use aes_gcm::Aes256Gcm;
 use aws_config::BehaviorVersion;
 use aws_sdk_s3::types::BucketLocationConstraint;
 use clap::Parser;
-use rand::{thread_rng, Rng};
 use tokio::{fs::OpenOptions, io::AsyncWriteExt};
 
 use crate::{
     backup_data::BackupData,
     create_bucket::create_bucket,
-    create_immutable_key::create_immutable_key,
-    derive_key::{encrypt_immutable_key, generate_salt_and_derive_key},
     get_config::get_config,
-    remote_hot_data::{upload_hot_data, EncryptionData, RemoteHotDataDecrypted},
+    init_encryption_data::init_encryption_data,
+    remote_hot_data::{upload_hot_data, RemoteHotDataDecrypted},
 };
 
 #[derive(Parser)]
@@ -65,24 +61,8 @@ pub async fn init_command(
     let encryption_data = match &config.encryption {
         None => anyhow::Ok(None),
         Some(encryption_config) => {
-            // println!("Encryption password: {:?}", encryption_password);
-
-            // We will create an encryption key randomly
-            let immutable_key = create_immutable_key();
-            // println!("Immutable key: {:?}", immutable_key);
-            // We will also create a key derived from the password, along with a random salt
-            let (password_derived_key_salt, password_derived_key) =
-                generate_salt_and_derive_key(&encryption_config.password.get_bytes().await?)?;
-            // println!("password_derived_key_salt: {:?}", password_derived_key_salt);
-            // println!("password_derived_key: {:?}", password_derived_key);
-            // We will then encrypt the encryption key itself using the password
-            let encrypted_immutable_key =
-                encrypt_immutable_key(&password_derived_key, immutable_key.as_slice())?;
-            // println!("encrypted_immutable_key: {:?}", encrypted_immutable_key);
-            Ok(Some(EncryptionData {
-                password_derived_key_salt,
-                encrypted_immutable_key,
-            }))
+            init_encryption_data(&encryption_config.password.get_bytes().await?)
+                .map(|encryption_data| Some(encryption_data))
         }
     }?;
 

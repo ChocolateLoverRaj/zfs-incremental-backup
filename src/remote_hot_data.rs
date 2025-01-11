@@ -20,7 +20,11 @@ pub struct EncryptionData {
     pub password_derived_key_salt: [u8; Salt::RECOMMENDED_LENGTH],
     /// 32 bytes for the key, plus 16 bytes for aes-256-gcm tag
     #[serde(with = "BigArray")]
-    pub encrypted_immutable_key: [u8; 32 + 16],
+    pub encrypted_root_key: [u8; 32 + 16],
+    /// Used to derive an aes-256-gcm key from the root key
+    pub aes_256_gcm_salt: [u8; Salt::RECOMMENDED_LENGTH],
+    /// Used to derive a blake3 key from the root key
+    pub blake3_salt: [u8; Salt::RECOMMENDED_LENGTH],
 }
 
 pub type Snapshots<'a> = Vec<Cow<'a, str>>;

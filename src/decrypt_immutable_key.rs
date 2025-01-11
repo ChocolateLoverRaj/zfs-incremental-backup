@@ -15,7 +15,7 @@ pub fn decrypt_immutable_key(
     let decrypted_key = cipher
         .decrypt(
             &Nonce::default(),
-            encryption_data.encrypted_immutable_key.as_ref(),
+            encryption_data.encrypted_root_key.as_ref(),
         )
         .map_err(|e| anyhow!("Failed to decrypt encrypted immutable key: {e:?}"))?;
     Ok(decrypted_key)

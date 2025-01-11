@@ -38,8 +38,9 @@ pub async fn change_password_command(
             let s3_client = aws_sdk_s3::Client::new(&sdk_config);
             let mut remote_hot_data =
                 download_hot_data(&backup_config, &s3_client, &backup_data.s3_bucket).await?;
+            let encryption_data = remote_hot_data.encryption.as_deref().ok_or(anyhow!("The local config specifies an encryption password, but the remote data is not encrypted."))?;
             let decrypted_immutable_key =
-                        decrypt_immutable_key(&encryption_password, remote_hot_data.encryption.as_deref().ok_or(anyhow!("The local config specifies an encryption password, but the remote data is not encrypted."))?)?;
+                decrypt_immutable_key(&encryption_password, encryption_data)?;
 
             let mut term = Term::default();
             let mut theme = MinimalTheme::default();
@@ -68,7 +69,8 @@ pub async fn change_password_command(
                 encrypt_immutable_key(&new_derived_key, &decrypted_immutable_key)?;
             remote_hot_data.encryption = Some(Cow::Owned(EncryptionData {
                 password_derived_key_salt: new_salt,
-                encrypted_immutable_key,
+                encrypted_root_key: encrypted_immutable_key,
+                ..*encryption_data
             }));
             upload_hot_data(
                 &backup_config,
