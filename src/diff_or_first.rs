@@ -39,6 +39,7 @@ pub async fn diff_or_first(
         }
         let mut diff_entries = parse_zfs_diff_output(command.stdout)?
             .into_iter()
+            // TODO: More optimizing
             .filter(|diff| {
                 if diff.file_type == FileType::Directory && diff.diff_type == DiffType::Modified(())
                 {
@@ -51,6 +52,12 @@ pub async fn diff_or_first(
             .map(|mut entry| {
                 anyhow::Ok({
                     entry.path = entry.path.strip_prefix(&zfs_mount_point)?.into();
+                    entry.diff_type = match entry.diff_type {
+                        DiffType::Renamed(new_path) => {
+                            DiffType::Renamed(new_path.strip_prefix(&zfs_mount_point)?.into())
+                        }
+                        diff_type => diff_type,
+                    };
                     entry
                 })
             })
