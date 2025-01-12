@@ -249,52 +249,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "aws-sdk-dynamodb"
-version = "1.56.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34ba7f3f9fa39ae0d877e69c7abb145571e0b6ed8a1b570f36dbd147176e4019"
-dependencies = [
- "aws-credential-types",
- "aws-runtime",
- "aws-smithy-async",
- "aws-smithy-http",
- "aws-smithy-json",
- "aws-smithy-runtime",
- "aws-smithy-runtime-api",
- "aws-smithy-types",
- "aws-types",
- "bytes",
- "fastrand",
- "http 0.2.12",
- "once_cell",
- "regex-lite",
- "tracing",
-]
-
-[[package]]
-name = "aws-sdk-iam"
-version = "1.54.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b59233b72dabd2a0583d6853426370b502be303a05ae9eefe79982cc199cadb8"
-dependencies = [
- "aws-credential-types",
- "aws-runtime",
- "aws-smithy-async",
- "aws-smithy-http",
- "aws-smithy-json",
- "aws-smithy-query",
- "aws-smithy-runtime",
- "aws-smithy-runtime-api",
- "aws-smithy-types",
- "aws-smithy-xml",
- "aws-types",
- "http 0.2.12",
- "once_cell",
- "regex-lite",
- "tracing",
-]
-
-[[package]]
 name = "aws-sdk-pricing"
 version = "1.53.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -600,6 +554,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "aws-smithy-types-convert"
+version = "0.60.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f280f434214856abace637b1f944d50ccca216814813acd195cdd7f206ce17f"
+dependencies = [
+ "aws-smithy-async",
+ "futures-core",
+]
+
+[[package]]
 name = "aws-smithy-xml"
 version = "0.60.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -713,6 +677,12 @@ name = "bumpalo"
 version = "3.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "79296716171880943b8470b5f8d03aa55eb2e645a4874bdbb28adb49162e012c"
+
+[[package]]
+name = "bytecount"
+version = "0.6.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5ce89b21cab1437276d2650d57e971f9d548a2d9037cc231abdc0562b97498ce"
 
 [[package]]
 name = "byteorder"
@@ -1896,6 +1866,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "papergrid"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2b0f8def1f117e13c895f3eda65a7b5650688da29d6ad04635f61bc7b92eebd"
+dependencies = [
+ "bytecount",
+ "fnv",
+ "unicode-width 0.2.0",
+]
+
+[[package]]
 name = "parking_lot"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2031,6 +2012,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "proc-macro-error-attr2"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "96de42df36bb9bba5542fe9f1a054b8cc87e172759a1868aa05c1f3acc89dfc5"
+dependencies = [
+ "proc-macro2",
+ "quote",
+]
+
+[[package]]
+name = "proc-macro-error2"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "11ec05c52be0a07b08061f7dd003e7d7092e0472bc731b4af7bb1ef876109802"
+dependencies = [
+ "proc-macro-error-attr2",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.91",
+]
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.92"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2057,7 +2060,7 @@ dependencies = [
  "crossterm",
  "strip-ansi-escapes",
  "thiserror 1.0.69",
- "unicode-width",
+ "unicode-width 0.1.14",
 ]
 
 [[package]]
@@ -2713,6 +2716,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "tabled"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c6709222f3973137427ce50559cd564dc187a95b9cfe01613d2f4e93610e510a"
+dependencies = [
+ "papergrid",
+ "tabled_derive",
+]
+
+[[package]]
+name = "tabled_derive"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "931be476627d4c54070a1f3a9739ccbfec9b36b39815106a20cce2243bbcefe1"
+dependencies = [
+ "heck 0.4.1",
+ "proc-macro-error2",
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "thiserror"
 version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2961,6 +2987,12 @@ name = "unicode-width"
 version = "0.1.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7dd6e30e90baa6f72411720665d41d89b9a3d039dc45b8faea1ddd07f617f6af"
+
+[[package]]
+name = "unicode-width"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1fc81956842c57dac11422a97c3b8195a1ff727f06e85c84ed2e8aa277c9a0fd"
 
 [[package]]
 name = "universal-hash"
@@ -3532,10 +3564,9 @@ dependencies = [
  "anyhow",
  "argon2",
  "aws-config",
- "aws-sdk-dynamodb",
- "aws-sdk-iam",
  "aws-sdk-pricing",
  "aws-sdk-s3",
+ "aws-smithy-types-convert",
  "blake3",
  "bytes",
  "bytes-stream",
@@ -3546,7 +3577,6 @@ dependencies = [
  "hex",
  "http-body 1.0.1",
  "humansize",
- "pin-project-lite",
  "postcard",
  "proc-mounts",
  "promptuity",
@@ -3557,6 +3587,7 @@ dependencies = [
  "serde_json",
  "shallowclone",
  "spinners",
+ "tabled",
  "tokio",
  "tokio-stream",
  "tokio-util",

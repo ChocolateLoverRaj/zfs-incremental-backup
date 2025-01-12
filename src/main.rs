@@ -3,6 +3,7 @@ use change_password_command::{change_password_command, ChangePasswordCommand};
 use check_password_command::{check_password_command, CheckPasswordCommand};
 use clap::{Parser, Subcommand};
 use init_command::{init_command, InitCommand};
+use status_command::{status_command, StatusCommand};
 
 mod aws_s3_prices;
 mod backup_command;
@@ -25,7 +26,9 @@ mod encryption_test;
 mod file_meta_data;
 mod get_config;
 mod get_data;
+mod get_encrypted_snapshot_name;
 mod get_hasher;
+mod get_snapshot_len;
 mod init_command;
 mod init_encryption_data;
 mod optimize_diff_entries;
@@ -35,6 +38,7 @@ mod retry_steps_2;
 mod serde_file;
 mod sleep_with_spinner;
 mod snapshot_upload_stream_2;
+mod status_command;
 mod zfs_mount_get;
 mod zfs_take_snapshot;
 
@@ -54,6 +58,7 @@ enum Commands {
     },
     CheckPassword(CheckPasswordCommand),
     ChangePassword(ChangePasswordCommand),
+    Status(StatusCommand),
 }
 
 #[tokio::main]
@@ -64,6 +69,7 @@ async fn main() -> anyhow::Result<()> {
         Commands::Backup { command } => backup_commands(command).await?,
         Commands::CheckPassword(command) => check_password_command(command).await?,
         Commands::ChangePassword(command) => change_password_command(command).await?,
+        Commands::Status(command) => status_command(command).await?,
     }
     Ok(())
 }

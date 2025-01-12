@@ -19,7 +19,7 @@ use crate::{
     diff_entry::FileType,
     diff_or_first::diff_or_first,
     encrypt_stream::EncryptStream,
-    get_hasher::get_hasher,
+    get_encrypted_snapshot_name::get_encrypted_snapshot_name,
     optimize_diff_entries::optimize_diff_entries,
     remote_hot_data::{download_hot_data, upload_hot_data, RemoteHotDataDecrypted},
     retry_steps_2::{RetryStepNotFinished2, RetryStepOutput2, StepDoer2},
@@ -269,14 +269,16 @@ impl<'a> StepDoer2<M, BackupStep<'a>, Option<Cow<'a, str>>, anyhow::Error, anyho
                                 Some(encryption_config) => {
                                     let password = encryption_config.password.get_bytes().await?;
                                     let remote_hot_data =
-                                        self.take_remote_hot_data(&s3_client).await?;
+                                        self.get_remote_hot_data(&s3_client).await?;
                                     stream
                                         .try_bytes_chunks(ENCRYPTION_CHUNK_SIZE)
                                         .encrypt(
                                             password,
                                             remote_hot_data
                                                 .encryption
+                                                .as_ref()
                                                 .ok_or(anyhow!("No encryption data"))?
+                                                .shallow_clone()
                                                 .into_owned(),
                                             {
                                                 let bytes = (remote_hot_data.snapshots.len()
@@ -319,31 +321,14 @@ impl<'a> StepDoer2<M, BackupStep<'a>, Option<Cow<'a, str>>, anyhow::Error, anyho
                         .storage_class(StorageClass::Standard)
                         .bucket(self.backup_data.s3_bucket.as_ref())
                         .key({
-                            let snapshot_name = {
-                                match &self.config.encryption {
-                                    Some(encryption_config) => {
-                                        if encryption_config.encrypt_snapshot_names {
-                                            let encryption_data = self
-                                                .remote_hot_data
-                                                .as_ref()
-                                                .ok_or(anyhow!("No remote hot data"))?
-                                                .encryption
-                                                .as_deref()
-                                                .ok_or(anyhow!("No encryption data"))?;
-                                            &get_hasher(
-                                                &encryption_config.password.get_bytes().await?,
-                                                encryption_data,
-                                            )?
-                                            .update(backup_step_upload.snapshot_name.as_bytes())
-                                            .finalize()
-                                            .to_string()
-                                        } else {
-                                            backup_step_upload.snapshot_name.as_ref()
-                                        }
-                                    }
-                                    None => backup_step_upload.snapshot_name.as_ref(),
-                                }
-                            };
+                            let remote_hot_data =
+                                self.get_remote_hot_data(&s3_client).await?.clone();
+                            let snapshot_name = get_encrypted_snapshot_name(
+                                &self.config,
+                                remote_hot_data,
+                                &backup_step_upload.snapshot_name,
+                            )
+                            .await?;
                             format!(
                                 "{}/{}/{}",
                                 SNAPSHOTS_PREFIX,
