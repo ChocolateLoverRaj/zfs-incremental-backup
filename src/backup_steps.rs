@@ -20,6 +20,7 @@ use crate::{
     diff_or_first::diff_or_first,
     encrypt_stream::EncryptStream,
     get_hasher::get_hasher,
+    optimize_diff_entries::optimize_diff_entries,
     remote_hot_data::{download_hot_data, upload_hot_data, RemoteHotDataDecrypted},
     retry_steps_2::{RetryStepNotFinished2, RetryStepOutput2, StepDoer2},
     sleep_with_spinner::sleep_with_spinner,
@@ -132,12 +133,16 @@ impl<'a> StepDoer2<M, BackupStep<'a>, Option<Cow<'a, str>>, anyhow::Error, anyho
                     .ok_or(anyhow!("Not mounted"))?,
                 );
                 let diff = stream::iter(
-                    diff_or_first(
-                        &self.config.zfs_dataset_name,
-                        self.backup_data.last_saved_snapshot_name.as_deref(),
-                        &backup_step_diff.snapshot_name,
-                    )
-                    .await?
+                    {
+                        let mut diff_entries = diff_or_first(
+                            &self.config.zfs_dataset_name,
+                            self.backup_data.last_saved_snapshot_name.as_deref(),
+                            &backup_step_diff.snapshot_name,
+                        )
+                        .await?;
+                        optimize_diff_entries(&mut diff_entries);
+                        diff_entries
+                    }
                     .into_iter(),
                 )
                 .flat_map_unordered(None, |diff_entry| {

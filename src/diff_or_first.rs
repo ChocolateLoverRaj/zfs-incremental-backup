@@ -12,7 +12,6 @@ use crate::{
 
 /// Parses the output of zfs diff or reads all the files if there is no previous snapshot to compare to
 /// Does not include "modified folder" because it will include the actual modifications within the folder anyways
-/// Always sorted in order of folders before stuff inside folders
 pub async fn diff_or_first(
     dataset: &str,
     previous_snapshot: Option<&str>,
@@ -37,7 +36,7 @@ pub async fn diff_or_first(
                 String::from_utf8(command.stderr)
             ))?;
         }
-        let mut diff_entries = parse_zfs_diff_output(command.stdout)?
+        let diff_entries = parse_zfs_diff_output(command.stdout)?
             .into_iter()
             // TODO: More optimizing
             .filter(|diff| {
@@ -62,8 +61,6 @@ pub async fn diff_or_first(
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
-        // Sort it by path so that folders come before their children
-        diff_entries.sort_by_key(|diff| diff.path.clone());
         Ok(diff_entries)
     } else {
         println!("Got mountpoint: {snapshot_mount_point:?}");
