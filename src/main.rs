@@ -38,6 +38,7 @@ mod retry_steps_2;
 mod serde_file;
 mod sleep_with_spinner;
 mod snapshot_upload_stream_2;
+mod sqs_test;
 mod status_command;
 mod zfs_mount_get;
 mod zfs_take_snapshot;
