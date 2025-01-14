@@ -34,6 +34,7 @@ struct RemoteHotData<'a> {
     pub encryption: Option<Cow<'a, EncryptionData>>,
     /// Snapshots may be encrypted, depending on options
     pub snapshots: Vec<u8>,
+    pub sqs: Cow<'a, str>,
 }
 
 impl<'a> RemoteHotData<'a> {
@@ -63,6 +64,7 @@ impl<'a> RemoteHotData<'a> {
                 postcard::from_bytes(&decrypted_bytes)?
             },
             encryption: self.encryption,
+            sqs: self.sqs,
         })
     }
 }
@@ -74,12 +76,12 @@ pub struct RemoteHotDataDecrypted<'a> {
     /// The names of the snapshots, as they appear as a S3 key.
     /// For example, a snapshot might be stored in the S3 objects `snapshots/<snapshot_name>/0`, `snapshots/<snapshot_name>/1`
     pub snapshots: Snapshots<'a>,
+    pub sqs: Cow<'a, str>,
 }
 
 impl<'a> RemoteHotDataDecrypted<'a> {
-    async fn encrypt(&'a self, config: &BackupConfig) -> anyhow::Result<RemoteHotData<'a>> {
+    async fn encrypt(self, config: &BackupConfig) -> anyhow::Result<RemoteHotData<'a>> {
         Ok(RemoteHotData {
-            encryption: self.encryption.shallow_clone(),
             snapshots: {
                 let mut snapshots = postcard::to_allocvec(&self.snapshots)?;
                 match &self.encryption {
@@ -100,6 +102,8 @@ impl<'a> RemoteHotDataDecrypted<'a> {
                     }
                 }
             },
+            encryption: self.encryption,
+            sqs: self.sqs,
         })
     }
 }
@@ -108,7 +112,7 @@ pub async fn upload_hot_data<'a>(
     config: &BackupConfig,
     s3_client: &aws_sdk_s3::Client,
     s3_bucket: &str,
-    remote_hot_data: &RemoteHotDataDecrypted<'a>,
+    remote_hot_data: RemoteHotDataDecrypted<'a>,
 ) -> anyhow::Result<()> {
     s3_client
         .put_object()

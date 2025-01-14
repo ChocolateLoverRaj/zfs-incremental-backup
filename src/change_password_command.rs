@@ -76,7 +76,7 @@ pub async fn change_password_command(
                 &backup_config,
                 &s3_client,
                 &backup_data.s3_bucket,
-                &remote_hot_data,
+                remote_hot_data,
             )
             .await?;
             println!("Changed encryption password. Make sure to update your config to use the new password because the previous password will not work. You can use `check-password` to check it.");

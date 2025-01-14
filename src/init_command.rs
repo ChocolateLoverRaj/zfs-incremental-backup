@@ -8,9 +8,11 @@ use tokio::{fs::OpenOptions, io::AsyncWriteExt};
 use crate::{
     backup_data::BackupData,
     create_bucket::create_bucket,
+    create_sqs::create_sqs,
     get_config::get_config,
     init_encryption_data::init_encryption_data,
     remote_hot_data::{upload_hot_data, RemoteHotDataDecrypted},
+    set_s3_notifications::set_s3_notifications,
 };
 
 #[derive(Parser)]
@@ -18,6 +20,8 @@ pub struct InitCommand {
     /// The bucket name will be the prefix with a GUID. One example of a bucket name is ``. Must follow https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucketnamingrules.html or you will get an error.
     #[arg(short, long, default_value = "zfs-backup")]
     bucket_prefix: String,
+    #[arg(short, long, default_value = "zfs-backup")]
+    sqs_prefix: String,
     #[arg(short, long, default_value = "us-west-2")]
     region: BucketLocationConstraint,
     /// Path to a JSON file with config
@@ -34,6 +38,7 @@ pub struct InitCommand {
 pub async fn init_command(
     InitCommand {
         bucket_prefix,
+        sqs_prefix,
         region,
         config_path,
         data_path,
@@ -56,7 +61,10 @@ pub async fn init_command(
     let config = get_config(config_path).await?;
     let sdk_config = aws_config::defaults(BehaviorVersion::latest()).load().await;
     let s3_client = aws_sdk_s3::Client::new(&sdk_config);
+
     let bucket = create_bucket(&s3_client, &bucket_prefix, &region).await?;
+    let sqs_arn = create_sqs(&sdk_config, &sqs_prefix, &bucket, &region).await?;
+    set_s3_notifications(&sdk_config, &bucket, &sqs_arn).await?;
 
     let encryption_data = match &config.encryption {
         None => anyhow::Ok(None),
@@ -77,9 +85,10 @@ pub async fn init_command(
         &config,
         &s3_client,
         &backup_data.s3_bucket,
-        &RemoteHotDataDecrypted {
+        RemoteHotDataDecrypted {
             encryption: encryption_data.map(|data| Cow::Owned(data)),
             snapshots: Default::default(),
+            sqs: Cow::Owned(sqs_arn.queue_name),
         },
     )
     .await?;

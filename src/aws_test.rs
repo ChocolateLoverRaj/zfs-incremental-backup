@@ -1,7 +1,13 @@
 #[cfg(test)]
 pub mod tests {
     use aws_config::BehaviorVersion;
-    use aws_sdk_sqs::types::builders::DeleteMessageBatchRequestEntryBuilder;
+    use aws_sdk_s3::types::{
+        builders::{GlacierJobParametersBuilder, RestoreRequestBuilder},
+        Tier,
+    };
+    use aws_sdk_sqs::types::{builders::DeleteMessageBatchRequestEntryBuilder, QueueAttributeName};
+
+    const QUEUE_URL: &str = "https://sqs.us-west-2.amazonaws.com/756723425372/test";
 
     #[tokio::test]
     async fn take_and_print_messages() {
@@ -10,10 +16,9 @@ pub mod tests {
         let mut received_message_ids = Vec::default();
         loop {
             println!("Waiting to receive messages");
-            let queue_url = "https://sqs.us-west-2.amazonaws.com/756723425372/test";
             let messages = sqs_client
                 .receive_message()
-                .queue_url(queue_url)
+                .queue_url(QUEUE_URL)
                 .max_number_of_messages(10)
                 .send()
                 .await
@@ -63,7 +68,7 @@ pub mod tests {
             if !messages_to_delete_from_queue.is_empty() {
                 sqs_client
                     .delete_message_batch()
-                    .queue_url(queue_url)
+                    .queue_url(QUEUE_URL)
                     .set_entries(Some(messages_to_delete_from_queue))
                     .send()
                     .await
@@ -81,5 +86,74 @@ pub mod tests {
                 message_bodies, ignored_count
             );
         }
+    }
+
+    #[tokio::test]
+    async fn get_queue_attributes() {
+        let sdk_config = aws_config::defaults(BehaviorVersion::latest()).load().await;
+        let sqs_client = aws_sdk_sqs::Client::new(&sdk_config);
+        let attributes = sqs_client
+            .get_queue_attributes()
+            .attribute_names(QueueAttributeName::VisibilityTimeout)
+            .queue_url(QUEUE_URL)
+            .send()
+            .await
+            .unwrap();
+        println!("{:#?}", attributes);
+    }
+
+    #[tokio::test]
+    async fn restore_to_new_object() {
+        let sdk_config = aws_config::defaults(BehaviorVersion::latest()).load().await;
+        let s3_client = aws_sdk_s3::Client::new(&sdk_config);
+        let bucket = "zfs-backup-36486ac0-7b1a-4068-b429-06a61fef623d";
+        let output = s3_client
+            .restore_object()
+            .bucket(bucket)
+            .key("ChocolateLoverRaj.jpeg")
+            .restore_request(
+                RestoreRequestBuilder::default()
+                    .glacier_job_parameters(
+                        GlacierJobParametersBuilder::default()
+                            .tier(Tier::Bulk)
+                            .build()
+                            .unwrap(),
+                    )
+                    .days(1)
+                    // .output_location(
+                    //     OutputLocationBuilder::default()
+                    //         .s3(S3LocationBuilder::default()
+                    //             .bucket_name(bucket)
+                    //             .prefix("restored-")
+                    //             .storage_class(StorageClass::Standard)
+                    //             .build()
+                    //             .unwrap())
+                    //         .build(),
+                    // )
+                    .build(),
+            )
+            .send()
+            .await
+            .unwrap();
+        println!("{:#?}", output);
+    }
+
+    #[tokio::test]
+    async fn copy_object() {
+        let sdk_config = aws_config::defaults(BehaviorVersion::latest()).load().await;
+        let s3_client = aws_sdk_s3::Client::new(&sdk_config);
+        let bucket = "zfs-backup-36486ac0-7b1a-4068-b429-06a61fef623d";
+        let output = s3_client
+            .copy_object()
+            .bucket(bucket)
+            .copy_source(format!(
+                "{}/PXL_20241215_190954765_exported_1776_1734289812865~2.jpg",
+                bucket
+            ))
+            .key("copied.jpg")
+            .send()
+            .await
+            .unwrap();
+        println!("{:#?}", output);
     }
 }

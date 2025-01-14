@@ -407,7 +407,7 @@ impl<'a> StepDoer2<M, BackupStep<'a>, Option<Cow<'a, str>>, anyhow::Error, anyho
                         &self.config,
                         &s3_client,
                         &self.backup_data.s3_bucket,
-                        &new_hot_data,
+                        new_hot_data,
                     )
                     .await?;
                 }

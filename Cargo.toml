@@ -13,6 +13,7 @@ aws-config = { version = "1.5.11", features = ["behavior-version-latest"] }
 aws-sdk-pricing = "1.53.0"
 aws-sdk-s3 = "1.66.0"
 aws-sdk-sqs = "1.53.0"
+aws-sdk-sts = "1.54.1"
 aws-smithy-types-convert = { version = "0.60.8", features = ["convert-streams"] }
 blake3 = "1.5.5"
 bytes = "1.9.0"
