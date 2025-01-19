@@ -46,6 +46,7 @@ mod set_s3_notifications;
 mod sleep_with_spinner;
 mod snapshot_upload_stream_2;
 mod status_command;
+mod zfs_list_snapshots;
 mod zfs_mount_get;
 mod zfs_take_snapshot;
 

@@ -8,20 +8,26 @@ use anyhow::{anyhow, Context};
 use aws_config::BehaviorVersion;
 use aws_smithy_types_convert::stream::PaginationStreamImplStream;
 use clap::Parser;
-use futures::{future::try_join, TryFutureExt, TryStreamExt};
+use futures::{future::try_join, StreamExt, TryFutureExt, TryStreamExt};
 use promptuity::{
     prompts::{Input, Password, Select, SelectOption},
     themes::MinimalTheme,
     Promptuity, Term,
 };
 use shallowclone::ShallowClone;
-use tokio::{fs::OpenOptions, io::AsyncWriteExt};
+use tokio::{
+    fs::{read_dir, OpenOptions},
+    io::AsyncWriteExt,
+};
+use tokio_stream::wrappers::ReadDirStream;
 
 use crate::{
     backup_config::{BackupConfig, EncryptionConfig},
     backup_data::BackupData,
     encryption_password::EncryptionPassword,
     remote_hot_data::{download_hot_data_encrypted, RemoteHotData, RemoteHotDataEncrypted},
+    zfs_list_snapshots::zfs_list_snapshots,
+    zfs_mount_get::zfs_mount_get,
 };
 
 #[derive(Parser)]
@@ -53,6 +59,20 @@ pub async fn recover_config_command(
         create_empty_objects,
     }: RecoverConfigCommand,
 ) -> anyhow::Result<()> {
+    if !zfs_list_snapshots(&zfs_dataset_name).await?.is_empty() {
+        Err(anyhow!("Dataset must not have any snapshots"))?;
+    };
+    let mount_point = zfs_mount_get(&zfs_dataset_name)
+        .await?
+        .ok_or(anyhow!("dataset not mounted"))?;
+    if ReadDirStream::new(read_dir(mount_point).await?)
+        .count()
+        .await
+        > 0
+    {
+        Err(anyhow!("Dataset must not have any files in it"))?;
+    };
+
     let open_options = {
         let mut open_options = OpenOptions::new();
         open_options

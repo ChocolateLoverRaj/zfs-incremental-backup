@@ -72,6 +72,15 @@ impl<'a> BackupSteps<'a> {
             None => Ok(()),
             Some(name) => Err(anyhow!("Snapshot with name {:?} already saved", name)),
         }?;
+        let remote_last_saved_snapshot_name = hot_data
+            .data
+            .snapshots
+            .last()
+            .map(|cow| cow.shallow_clone().into_owned());
+        let local_last_saved_snapshot_name = self.backup_data.last_saved_snapshot_name.as_deref();
+        if local_last_saved_snapshot_name != remote_last_saved_snapshot_name.as_deref() {
+            Err(anyhow!("Cannot start a backup because the local last saved snapshot name: {:?} is different than the remote last saved snapshot name: {:?}", local_last_saved_snapshot_name, remote_last_saved_snapshot_name))?;
+        }
         // TODO: Handle crashing between taking snapshot and saving state. If we don't, then there could be unused snapshots
         Ok(RetryStepNotFinished2 {
             memory_data: None,

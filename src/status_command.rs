@@ -1,4 +1,4 @@
-use std::{borrow::Cow, cell::RefCell, path::PathBuf, sync::Arc};
+use std::{borrow::Cow, cell::RefCell, ops::Deref, path::PathBuf, sync::Arc};
 
 use aws_config::BehaviorVersion;
 use clap::Parser;
@@ -61,10 +61,7 @@ pub async fn status_command(
         "The backups are saved to the AWS S3 bucket {:?}",
         data.s3_bucket,
     );
-    println!(
-        "The last backed-up snapshot is {:?}",
-        data.last_saved_snapshot_name
-    );
+
     if data.backup_step.is_some() {
         println!("There is a backup in progress. It may not be running rn.");
     }
@@ -84,6 +81,7 @@ pub async fn status_command(
         .then({
             let cumulative_size = Arc::new(RefCell::new(0));
             let remote_hot_data = remote_hot_data.clone();
+            let data = data.clone();
             move |snapshot| {
                 let config = config.clone();
                 let remote_hot_data = remote_hot_data.clone();
@@ -118,6 +116,12 @@ pub async fn status_command(
     println!("Snapshots uploaded:");
     println!("{}", Table::new(rows).to_string());
     println!("The table shows the size on the cloud, but if you restore it then the size on disk may be different, depending on ZFS settings and encryption settings.");
+
+    if data.last_saved_snapshot_name.as_deref()
+        != remote_hot_data.data.snapshots.last().map(|cow| cow.deref())
+    {
+        println!("The remote backup data and the local backup data are out of sync!");
+    }
 
     Ok(())
 }
