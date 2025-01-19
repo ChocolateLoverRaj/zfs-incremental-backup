@@ -4,7 +4,7 @@ use futures::TryStreamExt;
 use crate::{
     backup_config::BackupConfig, backup_data::BackupData, config::SNAPSHOTS_PREFIX,
     get_encrypted_snapshot_name::get_encrypted_snapshot_name,
-    remote_hot_data::RemoteHotDataDecrypted,
+    remote_hot_data::RemoteHotDataInMemory,
 };
 
 /// Get the size of the snapshot
@@ -12,7 +12,7 @@ pub async fn get_snapshot_len<'a>(
     s3_client: &aws_sdk_s3::Client,
     config: &'a BackupConfig,
     data: BackupData<'a>,
-    remote_hot_data: RemoteHotDataDecrypted<'a>,
+    remote_hot_data: RemoteHotDataInMemory<'a>,
     snapshot_name: &'a str,
 ) -> anyhow::Result<u64> {
     Ok({

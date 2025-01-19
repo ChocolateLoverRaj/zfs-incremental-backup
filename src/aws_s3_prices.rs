@@ -58,6 +58,7 @@ struct Prices {
 }
 
 impl Prices {
+    #[allow(unused)]
     pub async fn get(region: impl Into<String>) -> anyhow::Result<Self> {
         let sdk_config = aws_config::defaults(BehaviorVersion::latest())
             // The pricing api is only available in certain regions

@@ -1,0 +1,44 @@
+{
+    "Records": [
+        {
+            "eventVersion": "2.1",
+            "eventSource": "aws:s3",
+            "awsRegion": "us-west-2",
+            "eventTime": "2025-01-13T16:45:42.369Z",
+            "eventName": "ObjectRestore:Completed",
+            "userIdentity": {
+                "principalId": "AmazonCustomer:A3MBARXK6CUKZW"
+            },
+            "requestParameters": {
+                "sourceIPAddress": "s3.amazonaws.com"
+            },
+            "responseElements": {
+                "x-amz-request-id": "19565AF60D3547CD",
+                "x-amz-id-2": "NrkwnegcljKc3wZZr8+ie419RaUNa9fkQ2KSRR5WnSr3/jWGxj/HrSjcOSR8nRh53Zw4ttqEDnxV3PFsxdjwlg=="
+            },
+            "s3": {
+                "s3SchemaVersion": "1.0",
+                "configurationId": "Test",
+                "bucket": {
+                    "name": "zfs-backup-36486ac0-7b1a-4068-b429-06a61fef623d",
+                    "ownerIdentity": {
+                        "principalId": "A3MBARXK6CUKZW"
+                    },
+                    "arn": "arn:aws:s3:::zfs-backup-36486ac0-7b1a-4068-b429-06a61fef623d"
+                },
+                "object": {
+                    "key": "PXL_20241215_190954765_exported_1776_1734289812865%7E2.jpg",
+                    "size": 24920,
+                    "eTag": "ab77b8564a4a0ac601b2cde056522179",
+                    "sequencer": "0067834169CE8BBEB8"
+                }
+            },
+            "glacierEventData": {
+                "restoreEventData": {
+                    "lifecycleRestorationExpiryTime": "2025-01-15T00:00:00.000Z",
+                    "lifecycleRestoreStorageClass": "DEEP_ARCHIVE"
+                }
+            }
+        }
+    ]
+}

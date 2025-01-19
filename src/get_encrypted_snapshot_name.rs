@@ -3,18 +3,19 @@ use std::borrow::Cow;
 use anyhow::anyhow;
 
 use crate::{
-    backup_config::BackupConfig, get_hasher::get_hasher, remote_hot_data::RemoteHotDataDecrypted,
+    backup_config::BackupConfig, get_hasher::get_hasher, remote_hot_data::RemoteHotDataInMemory,
 };
 
 pub async fn get_encrypted_snapshot_name<'a>(
     config: &'a BackupConfig,
-    remote_hot_data: RemoteHotDataDecrypted<'a>,
+    remote_hot_data: RemoteHotDataInMemory<'a>,
     snapshot_name: &'a str,
 ) -> anyhow::Result<Cow<'a, str>> {
     let snapshot_name = {
         match &config.encryption {
             Some(encryption_config) => {
-                if encryption_config.encrypt_snapshot_names {
+                // Snapshot names are currently always encrypted
+                if true {
                     let encryption_data = remote_hot_data
                         .encryption
                         .as_deref()

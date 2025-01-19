@@ -40,7 +40,7 @@ pub async fn status_command(
             println!("Files stored on the cloud are not encrypted from the cloud service");
         }
         Some(encryption_config) => {
-            println!("Files stored on the cloud are encrypted. To restore, you will need your encryption password in addition to having access to the cloud resource.");
+            println!("Files stored on the cloud are encrypted, including snapshot names. To restore, you will need your encryption password in addition to having access to the cloud resource.");
             match &encryption_config.password {
                 EncryptionPassword::File(file) => {
                     println!("You are storing your encryption password in the file {:?}. Make sure you will have this file available when you restore. Keep this file a secret.", file);
@@ -49,17 +49,17 @@ pub async fn status_command(
                     println!("You are storing your encryption password in the config file ({:?}). Make sure you have your config file or password available when you restore. Keep your config file a secret.", config_path);
                 }
             }
-            if encryption_config.encrypt_snapshot_names {
-                println!("You are also encrypting the snapshot names themselves.");
-            } else {
-                println!("The files are encrypted, but the snapshot names are not");
-            }
+            // if encryption_config.encrypt_snapshot_names {
+            //     println!("You are also encrypting the snapshot names themselves.");
+            // } else {
+            //     println!("The files are encrypted, but the snapshot names are not");
+            // }
         }
     }
 
     println!(
-        "The backups are saved to the AWS S3 bucket {:?} in the AWS S3 region {:?}",
-        data.s3_bucket, data.s3_region
+        "The backups are saved to the AWS S3 bucket {:?}",
+        data.s3_bucket,
     );
     println!(
         "The last backed-up snapshot is {:?}",
@@ -80,7 +80,7 @@ pub async fn status_command(
         cumulative_size: Cow<'a, str>,
     }
 
-    let rows = stream::iter(remote_hot_data.snapshots.iter())
+    let rows = stream::iter(remote_hot_data.data.snapshots.iter())
         .then({
             let cumulative_size = Arc::new(RefCell::new(0));
             let remote_hot_data = remote_hot_data.clone();

@@ -11,7 +11,7 @@ use crate::{
     create_sqs::create_sqs,
     get_config::get_config,
     init_encryption_data::init_encryption_data,
-    remote_hot_data::{upload_hot_data, RemoteHotDataDecrypted},
+    remote_hot_data::{upload_hot_data, RemoteHotDataInMemory, RemoteHotEncryptedData},
     set_s3_notifications::set_s3_notifications,
 };
 
@@ -76,7 +76,7 @@ pub async fn init_command(
 
     let backup_data = BackupData {
         s3_bucket: Cow::Owned(bucket),
-        s3_region: Cow::Owned(region.to_string()),
+        // s3_region: Cow::Owned(region.to_string()),
         last_saved_snapshot_name: None,
         backup_step: None,
     };
@@ -85,10 +85,12 @@ pub async fn init_command(
         &config,
         &s3_client,
         &backup_data.s3_bucket,
-        RemoteHotDataDecrypted {
+        RemoteHotDataInMemory {
             encryption: encryption_data.map(|data| Cow::Owned(data)),
-            snapshots: Default::default(),
-            sqs: Cow::Owned(sqs_arn.queue_name),
+            data: RemoteHotEncryptedData {
+                snapshots: Default::default(),
+                sqs: Cow::Owned(sqs_arn.queue_name),
+            },
         },
     )
     .await?;

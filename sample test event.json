@@ -1,0 +1,8 @@
+{
+    "Service": "Amazon S3",
+    "Event": "s3:TestEvent",
+    "Time": "2025-01-19T18:02:38.497Z",
+    "Bucket": "zfs-backup-571cc98c-c9e3-4e15-aafd-12e7e0362e0b",
+    "RequestId": "4ZAZ2N6KPSH8VSHM",
+    "HostId": "rRYvY0Fq8bnSqwgw2Znt3EDZWnWkHO6E9UDBlhLtjv1SexBMCmUd7UBHXRtvrGYabFoVg49GNPM="
+}

@@ -16,6 +16,15 @@ pub struct SqsArn {
     pub queue_name: String,
 }
 
+impl SqsArn {
+    pub fn get_url(&self) -> String {
+        format!(
+            "https://sqs.{}.amazonaws.com/{}/{}",
+            self.region, self.account_id, self.queue_name
+        )
+    }
+}
+
 impl Display for SqsArn {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(

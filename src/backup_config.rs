@@ -7,8 +7,8 @@ pub struct EncryptionConfig {
     /// You can change the encryption password later, but you can't change from Some to None or None to Some.
     /// You can set the encryption password to an empty string to be able to set a password later.
     pub password: EncryptionPassword,
-    /// If set to true, the encryption password will be needed to view snapshot names, and object keys will use a secure hash of the password names instead of the actual names.
-    pub encrypt_snapshot_names: bool,
+    // /// If set to true, the encryption password will be needed to view snapshot names, and object keys will use a secure hash of the password names instead of the actual names.
+    // pub encrypt_snapshot_names: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

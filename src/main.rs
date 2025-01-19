@@ -3,6 +3,7 @@ use change_password_command::{change_password_command, ChangePasswordCommand};
 use check_password_command::{check_password_command, CheckPasswordCommand};
 use clap::{Parser, Subcommand};
 use init_command::{init_command, InitCommand};
+use recover_config_command::{recover_config_command, RecoverConfigCommand};
 use status_command::{status_command, StatusCommand};
 
 mod aws_s3_prices;
@@ -36,7 +37,9 @@ mod init_command;
 mod init_encryption_data;
 mod optimize_diff_entries;
 mod read_dir_recursive;
+mod recover_config_command;
 mod remote_hot_data;
+mod restore_command;
 mod retry_steps_2;
 mod serde_file;
 mod set_s3_notifications;
@@ -63,6 +66,7 @@ enum Commands {
     CheckPassword(CheckPasswordCommand),
     ChangePassword(ChangePasswordCommand),
     Status(StatusCommand),
+    RecoverConfig(RecoverConfigCommand),
 }
 
 #[tokio::main]
@@ -74,6 +78,7 @@ async fn main() -> anyhow::Result<()> {
         Commands::CheckPassword(command) => check_password_command(command).await?,
         Commands::ChangePassword(command) => change_password_command(command).await?,
         Commands::Status(command) => status_command(command).await?,
+        Commands::RecoverConfig(commnad) => recover_config_command(commnad).await?,
     }
     Ok(())
 }

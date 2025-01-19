@@ -21,7 +21,9 @@ use crate::{
     encrypt_stream::EncryptStream,
     get_encrypted_snapshot_name::get_encrypted_snapshot_name,
     optimize_diff_entries::optimize_diff_entries,
-    remote_hot_data::{download_hot_data, upload_hot_data, RemoteHotDataDecrypted},
+    remote_hot_data::{
+        download_hot_data, upload_hot_data, RemoteHotDataInMemory, RemoteHotEncryptedData,
+    },
     retry_steps_2::{RetryStepNotFinished2, RetryStepOutput2, StepDoer2},
     sleep_with_spinner::sleep_with_spinner,
     snapshot_upload_stream_2::snapshot_upload_stream,
@@ -32,7 +34,7 @@ use crate::{
 pub struct BackupSteps<'a> {
     pub config: BackupConfig,
     pub backup_data: Rc<BackupData<'a>>,
-    pub remote_hot_data: Option<RemoteHotDataDecrypted<'a>>,
+    pub remote_hot_data: Option<RemoteHotDataInMemory<'a>>,
 }
 
 impl<'a> BackupSteps<'a> {
@@ -61,6 +63,7 @@ impl<'a> BackupSteps<'a> {
         };
         let hot_data = self.get_remote_hot_data(s3_client).await?;
         match hot_data
+            .data
             .snapshots
             .iter()
             .map(|saved_snapshot_name| saved_snapshot_name.deref())
@@ -83,7 +86,7 @@ impl<'a> BackupSteps<'a> {
     async fn take_remote_hot_data(
         &mut self,
         s3_client: &aws_sdk_s3::Client,
-    ) -> anyhow::Result<RemoteHotDataDecrypted<'a>> {
+    ) -> anyhow::Result<RemoteHotDataInMemory<'a>> {
         Ok({
             let remote_hot_data = match self.remote_hot_data.take() {
                 Some(remote_hot_data) => remote_hot_data,
@@ -99,7 +102,7 @@ impl<'a> BackupSteps<'a> {
     async fn get_remote_hot_data(
         &mut self,
         s3_client: &aws_sdk_s3::Client,
-    ) -> anyhow::Result<&mut RemoteHotDataDecrypted<'a>> {
+    ) -> anyhow::Result<&mut RemoteHotDataInMemory<'a>> {
         Ok({
             let remote_hot_data = self.take_remote_hot_data(s3_client).await?;
             self.remote_hot_data.insert(remote_hot_data)
@@ -281,7 +284,7 @@ impl<'a> StepDoer2<M, BackupStep<'a>, Option<Cow<'a, str>>, anyhow::Error, anyho
                                                 .shallow_clone()
                                                 .into_owned(),
                                             {
-                                                let bytes = (remote_hot_data.snapshots.len()
+                                                let bytes = (remote_hot_data.data.snapshots.len()
                                                     as u64)
                                                     .to_be_bytes();
                                                 let (unused, nonce) = bytes.split_at(1);
@@ -390,16 +393,20 @@ impl<'a> StepDoer2<M, BackupStep<'a>, Option<Cow<'a, str>>, anyhow::Error, anyho
                 // Only update if we have to
                 let remote_hot_data = self.take_remote_hot_data(&s3_client).await?;
                 if remote_hot_data
+                    .data
                     .snapshots
                     .last()
                     .map(|snapshot| snapshot.deref())
                     != Some(snapshot_name.deref())
                 {
-                    let new_hot_data = RemoteHotDataDecrypted {
-                        snapshots: {
-                            let mut s = remote_hot_data.snapshots.shallow_clone();
-                            s.push(snapshot_name.shallow_clone());
-                            s
+                    let new_hot_data = RemoteHotDataInMemory {
+                        data: RemoteHotEncryptedData {
+                            snapshots: {
+                                let mut s = remote_hot_data.data.snapshots.shallow_clone();
+                                s.push(snapshot_name.shallow_clone());
+                                s
+                            },
+                            ..remote_hot_data.data
                         },
                         ..remote_hot_data
                     };

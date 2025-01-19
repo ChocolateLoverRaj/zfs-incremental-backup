@@ -1,11 +1,14 @@
+use anyhow::{anyhow, Context};
 use aws_config::SdkConfig;
 use aws_sdk_s3::types::{
     builders::{NotificationConfigurationBuilder, QueueConfigurationBuilder},
     Event,
 };
+use serde::{Deserialize, Serialize};
 
 use crate::create_sqs::SqsArn;
 
+/// Sets the S3 notification and waits for the test event
 pub async fn set_s3_notifications(
     sdk_config: &SdkConfig,
     bucket: &str,
@@ -30,6 +33,51 @@ pub async fn set_s3_notifications(
         .send()
         .await
         .unwrap();
+    let sqs_client = aws_sdk_sqs::Client::new(&sdk_config);
+    let message = loop {
+        if let Some(message) = sqs_client
+            .receive_message()
+            .queue_url(sqs_arn.get_url())
+            .max_number_of_messages(1)
+            .send()
+            .await?
+            .messages
+            .take()
+            .unwrap_or_default()
+            .into_iter()
+            .next()
+        {
+            break message;
+        }
+    };
+    #[derive(Debug, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    struct SqsS3TestMessage {
+        service: String,
+        event: String,
+        time: String,
+        bucket: String,
+        request_id: String,
+        host_id: String,
+    }
+    let message_body = serde_json::from_str::<SqsS3TestMessage>(&message.body.unwrap_or_default())
+        .context("Invalid test SQS message")?;
+    if message_body.event != "s3:TestEvent" {
+        Err(anyhow!("Unexpected message event"))?;
+    }
+    if message_body.bucket != bucket {
+        Err(anyhow!("Bucket does not match"))?;
+    }
+    sqs_client
+        .delete_message()
+        .queue_url(sqs_arn.get_url())
+        .receipt_handle(
+            message
+                .receipt_handle
+                .ok_or(anyhow!("No message receipt handle"))?,
+        )
+        .send()
+        .await?;
     Ok(())
 }
 

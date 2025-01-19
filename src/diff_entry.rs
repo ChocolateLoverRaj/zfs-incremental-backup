@@ -30,6 +30,7 @@ impl<T> DiffType<T> {
         }
     }
 
+    #[allow(unused)]
     pub async fn map_async<N>(self, mut f: impl FnMut(T) -> BoxFuture<'static, N>) -> DiffType<N> {
         match self {
             DiffType::Created(prev) => DiffType::Created(f(prev).await),
@@ -77,6 +78,7 @@ impl<T> DiffEntry<T> {
         }
     }
 
+    #[allow(unused)]
     pub async fn map_async<N>(self, f: impl FnMut(T) -> BoxFuture<'static, N>) -> DiffEntry<N> {
         DiffEntry {
             path: self.path,

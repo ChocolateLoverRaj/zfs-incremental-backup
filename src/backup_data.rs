@@ -62,8 +62,8 @@ pub struct BackupState<'a> {
 #[derive(Debug, Serialize, Deserialize, Clone, ShallowClone)]
 pub struct BackupData<'a> {
     pub s3_bucket: Cow<'a, str>,
-    /// Idk if we will use this but it would be useful in case the region chances in the local AWS credentials / config file
-    pub s3_region: Cow<'a, str>,
+    // /// Idk if we will use this but it would be useful in case the region chances in the local AWS credentials / config file
+    // pub s3_region: Cow<'a, str>,
     pub last_saved_snapshot_name: Option<Cow<'a, str>>,
     pub backup_step: Option<BackupStep<'a>>,
 }
