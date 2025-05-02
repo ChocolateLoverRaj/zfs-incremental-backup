@@ -1,3 +1,6 @@
+> [!CAUTION]
+> I am no longer working on this and I'm not planning to work on this. Don't try using it unless you want to continue development of it yourself. I recommend [Rustic](https://github.com/rustic-rs/rustic). That is what I will be using If I need a sophisticated backup solution with cold storage.
+
 # ZFS Incremental Backup
 Backup ZFS datasets to AWS S3 Glacier Deep to save forever
 
