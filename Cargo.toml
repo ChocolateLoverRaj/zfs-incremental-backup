@@ -1,43 +1,4 @@
 [package]
 name = "zfs-incremental-backup"
 version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-aead = { version = "0.5.2", features = ["stream"] }
-aes-gcm = "0.10.3"
-aes-gcm-stream = "0.2.4"
-anyhow = "1.0.95"
-argon2 = "0.5.3"
-aws-config = { version = "1.5.11", features = ["behavior-version-latest"] }
-aws-sdk-pricing = "1.53.0"
-aws-sdk-s3 = "1.66.0"
-aws-sdk-sqs = "1.53.0"
-aws-sdk-sts = "1.54.1"
-aws-smithy-types-convert = { version = "0.60.8", features = ["convert-streams"] }
-blake3 = "1.5.5"
-bytes = "1.9.0"
-bytes-stream = "0.0.3"
-chacha20 = "0.9.1"
-chrono = "0.4.39"
-clap = { version = "4.5.23", features = ["derive"] }
-futures = "0.3.31"
-hex = "0.4.3"
-http-body = "1.0.1"
-humansize = "2.1.3"
-postcard = { version = "1.1.1", features = ["use-std"] }
-proc-mounts = "0.3.0"
-promptuity = "0.0.5"
-rand = "0.8.5"
-reqwest = { version = "0.12.11", features = ["rustls-tls", "stream"], default-features = false }
-serde = { version = "1.0.216", features = ["derive", "rc"] }
-serde-big-array = "0.5.1"
-serde_json = "1.0.134"
-shallowclone = "0.1.0"
-spinners = "4.1.1"
-tabled = "0.17.0"
-tokio = { version = "1.42.0", features = ["full"] }
-tokio-stream = { version = "0.1.17", features = ["fs"] }
-tokio-util = { version = "0.7.13", features = ["io"] }
-uuid = { version = "1.11.0", features = ["v4"] }
-varint-simd = "0.4.1"
+edition = "2024"
