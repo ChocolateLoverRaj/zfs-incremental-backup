@@ -1,12 +1,17 @@
-use crate::zfs_snapshot::{ZfsSnapshotInput, zfs_ensure_snapshot};
+mod zfs_ensure_snapshot;
+mod zfs_snapshot_exists;
+mod zfs_take_snapshot;
 
-mod zfs_snapshot;
+use crate::{zfs_ensure_snapshot::zfs_ensure_snapshot, zfs_take_snapshot::ZfsSnapshot};
 
-fn main() {
-    zfs_ensure_snapshot(ZfsSnapshotInput {
-        zpool: "test".into(),
+#[tokio::main]
+async fn main() {
+    let output = zfs_ensure_snapshot(ZfsSnapshot {
+        zpool: "zfs-incremental-backup-dev".into(),
         dataset: "test".into(),
-        snapshot_name: "backup0",
+        snapshot_name: "backup0".into(),
     })
+    .await
     .unwrap();
+    println!("{output:#?}");
 }

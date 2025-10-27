@@ -2,3 +2,6 @@
 /target
 # LibreOffice
 .~lock.*
+
+# For Testing / Development
+/dev
