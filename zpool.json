@@ -1,0 +1,54 @@
+{
+  "output_version": {
+    "command": "zpool list",
+    "vers_major": 0,
+    "vers_minor": 1
+  },
+  "pools": {
+    "zfs-incremental-backup-dev": {
+      "name": "zfs-incremental-backup-dev",
+      "type": "POOL",
+      "state": "ONLINE",
+      "pool_guid": "1505436971123336534",
+      "txg": "4",
+      "spa_version": "5000",
+      "zpl_version": "5",
+      "properties": {
+        "size": { "value": "48M", "source": { "type": "NONE", "data": "-" } },
+        "allocated": {
+          "value": "111K",
+          "source": { "type": "NONE", "data": "-" }
+        },
+        "free": { "value": "47.9M", "source": { "type": "NONE", "data": "-" } },
+        "checkpoint": {
+          "value": "-",
+          "source": { "type": "NONE", "data": "-" }
+        },
+        "expandsize": {
+          "value": "-",
+          "source": { "type": "NONE", "data": "-" }
+        },
+        "fragmentation": {
+          "value": "23%",
+          "source": { "type": "NONE", "data": "-" }
+        },
+        "capacity": {
+          "value": "0%",
+          "source": { "type": "NONE", "data": "-" }
+        },
+        "dedupratio": {
+          "value": "1.00x",
+          "source": { "type": "NONE", "data": "-" }
+        },
+        "health": {
+          "value": "ONLINE",
+          "source": { "type": "NONE", "data": "-" }
+        },
+        "altroot": {
+          "value": "-",
+          "source": { "type": "DEFAULT", "data": "-" }
+        }
+      }
+    }
+  }
+}
