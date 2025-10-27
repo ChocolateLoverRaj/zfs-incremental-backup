@@ -1,6 +1,7 @@
 use crate::{
+    zfs_snapshot::ZfsSnapshot,
     zfs_snapshot_exists::zfs_snapshot_exists,
-    zfs_take_snapshot::{ZfsSnapshot, ZfsTakeSnapshotError, zfs_take_snapshot},
+    zfs_take_snapshot::{ZfsTakeSnapshotError, zfs_take_snapshot},
 };
 
 #[derive(Debug)]
