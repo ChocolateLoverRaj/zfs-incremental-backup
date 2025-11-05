@@ -2,7 +2,7 @@ use tokio::process::Command;
 
 use crate::zfs_snapshot::ZfsSnapshot;
 
-pub async fn zfs_snapshot_exists(zfs_snapshot: ZfsSnapshot) -> Result<bool, tokio::io::Error> {
+pub async fn zfs_snapshot_exists(zfs_snapshot: ZfsSnapshot<'_>) -> Result<bool, tokio::io::Error> {
     let output = Command::new("zfs")
         .arg("list")
         .arg("-t")

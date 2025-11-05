@@ -37,8 +37,8 @@ pub enum BackupError<ReserveError, MarkUsedError, SaveError> {
 /// Can be incremental from a previous snapshot.
 pub async fn backup<ReserveError, MarkUsedError, SaveError>(
     mut save_data: BackupSaveData,
-    zfs_snapshot: ZfsSnapshot,
-    diff_from: Option<String>,
+    zfs_snapshot: ZfsSnapshot<'_>,
+    diff_from: Option<&str>,
     file_path: &Path,
     dest: S3Dest<'_>,
     client: &aws_sdk_s3::Client,

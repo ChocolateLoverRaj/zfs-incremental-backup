@@ -7,6 +7,7 @@ edition = "2024"
 async-trait = "0.1.89"
 aws-config = "1.8.8"
 aws-sdk-s3 = "1.108.0"
+clap = { version = "4.5.51", features = ["derive"] }
 rcs3ud = { version = "0.1.0", path = "../rcs3ud" }
 ron = "0.11.0"
 serde = { version = "1.0.228", features = ["derive"] }

@@ -11,7 +11,7 @@ pub enum ZfsTakeSnapshotError {
     ErrStatus(ExitStatus),
 }
 
-pub async fn zfs_take_snapshot(zfs_snapshot: ZfsSnapshot) -> Result<(), ZfsTakeSnapshotError> {
+pub async fn zfs_take_snapshot(zfs_snapshot: ZfsSnapshot<'_>) -> Result<(), ZfsTakeSnapshotError> {
     let output = Command::new("zfs")
         .arg("snapshot")
         .arg(zfs_snapshot.to_string())

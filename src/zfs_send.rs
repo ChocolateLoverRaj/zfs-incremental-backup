@@ -14,8 +14,8 @@ pub enum ZfsSendError {
 
 /// Does `zfs send -w <snapshot>`. If `diff_from` is specified, does an incremental snapshot with `-i`.
 pub async fn zfs_send(
-    zfs_snapshot: ZfsSnapshot,
-    diff_from: Option<String>,
+    zfs_snapshot: ZfsSnapshot<'_>,
+    diff_from: Option<&str>,
     stdout: Stdio,
 ) -> Result<(), ZfsSendError> {
     let mut command = Command::new("zfs");

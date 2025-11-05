@@ -19,7 +19,7 @@ pub enum ZfsEnsureSnapshotOutput {
 
 /// The assumption is that no external program is interacting with the same snapshot name while this function is running.
 pub async fn zfs_ensure_snapshot(
-    zfs_snapshot: ZfsSnapshot,
+    zfs_snapshot: ZfsSnapshot<'_>,
 ) -> Result<ZfsEnsureSnapshotOutput, ZfsEnsureSnapshotError> {
     match zfs_take_snapshot(zfs_snapshot.clone()).await {
         Ok(()) => Ok(ZfsEnsureSnapshotOutput::TookSnapshot),

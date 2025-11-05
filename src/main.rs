@@ -13,7 +13,6 @@ mod zpool_ensure_destroy;
 mod zpool_list;
 
 use std::{
-    env::current_dir,
     io::{self, ErrorKind},
     num::NonZero,
     path::PathBuf,
@@ -21,18 +20,56 @@ use std::{
 
 use aws_config::Region;
 use aws_sdk_s3::{config::Credentials, types::StorageClass};
+use clap::Parser;
 use rcs3ud::{
     AmountLimiter2, NoOpAmountLimiter2, NoOpOperationScheduler2, OperationScheduler2, S3Dest,
 };
-use tokio::fs::{OpenOptions, read_to_string, remove_file, write};
+use tokio::fs::{read_to_string, remove_file, write};
 
-use crate::{
-    backup::backup, zfs_create::zfs_create, zfs_dataset::ZfsDataset, zfs_snapshot::ZfsSnapshot,
-    zpool_create::zpool_create, zpool_ensure_destroy::zpool_ensure_destroy,
-};
+use crate::{backup::backup, zfs_snapshot::ZfsSnapshot};
+
+#[derive(Debug, Parser)]
+struct Cli {
+    #[arg(long)]
+    zpool: String,
+    #[arg(long)]
+    dataset: String,
+    #[arg(long)]
+    snapshot: String,
+    #[arg(long)]
+    diff_from: Option<String>,
+    #[arg(long)]
+    chunk_size: NonZero<usize>,
+    #[arg(long)]
+    temp_path: String,
+    #[arg(long)]
+    save_data_path: String,
+    #[arg(long)]
+    bucket: String,
+    #[arg(long)]
+    object_key: String,
+    #[arg(long, value_parser = parse_storage_class)]
+    storage_class: StorageClass,
+}
+
+fn parse_storage_class(storage_class: &str) -> Result<StorageClass, String> {
+    StorageClass::try_parse(storage_class).map_err(|e| e.to_string())
+}
 
 #[tokio::main]
 async fn main() {
+    let Cli {
+        zpool,
+        dataset,
+        snapshot,
+        diff_from,
+        chunk_size,
+        temp_path,
+        save_data_path,
+        bucket,
+        object_key,
+        storage_class,
+    } = Cli::parse();
     let config = aws_sdk_s3::config::Builder::default()
         .behavior_version_latest()
         .endpoint_url("http://localhost:9000")
@@ -47,47 +84,6 @@ async fn main() {
         .force_path_style(true)
         .build();
     let client = aws_sdk_s3::Client::from_conf(config);
-    // client.create_bucket().bucket("test").send().await.unwrap();
-    let a = client.list_buckets().send().await.unwrap();
-    let buckets = a.buckets();
-    println!("{buckets:?}");
-
-    let zpool = "zfs-incremental-backup-dev";
-    let output = zpool_ensure_destroy(zpool).await.unwrap();
-    println!("{output:?}");
-
-    let zpool_file_path = "./dev/zpool";
-    let zpool_file = OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .open(zpool_file_path)
-        .await
-        .unwrap();
-    zpool_file.set_len(64 * 1024 * 1024).await.unwrap();
-    zpool_create(
-        zpool,
-        current_dir()
-            .unwrap()
-            .join(zpool_file_path)
-            .to_str()
-            .unwrap(),
-    )
-    .await
-    .unwrap();
-    let dataset = "test";
-    zfs_create(ZfsDataset {
-        zpool: zpool.into(),
-        dataset: dataset.into(),
-    })
-    .await
-    .unwrap();
-
-    let backup0_snapshot = ZfsSnapshot {
-        zpool: zpool.into(),
-        dataset: dataset.into(),
-        snapshot_name: "backup0".into(),
-    };
 
     #[allow(unused)]
     #[derive(Debug)]
@@ -95,54 +91,8 @@ async fn main() {
         Serialize(ron::Error),
         Write(io::Error),
     }
-    let chunk_size = NonZero::new(30_000).unwrap();
-    let backup_save_file = "./dev/save_data_backup0.ron";
     backup(
-        match read_to_string(backup_save_file).await {
-            Ok(s) => ron::from_str(&s)
-                .inspect_err(|e| {
-                    println!("Error parsing save data: {e}. File might have gotten corrupted")
-                })
-                .unwrap_or_default(),
-            Err(e) => {
-                if e.kind() == ErrorKind::NotFound {
-                    Default::default()
-                } else {
-                    Err(e).unwrap()
-                }
-            }
-        },
-        backup0_snapshot.clone(),
-        None,
-        &PathBuf::from("./dev/backup0"),
-        S3Dest {
-            bucket: "test",
-            object_key: "backup0",
-            storage_class: StorageClass::Standard,
-        },
-        &client,
-        &mut (Box::new(NoOpAmountLimiter2)
-            as Box<dyn AmountLimiter2<ReserveError = (), MarkUsedError = ()> + Send>),
-        &mut (Box::new(NoOpOperationScheduler2) as Box<dyn OperationScheduler2 + Send>),
-        chunk_size,
-        &mut async |save_data| {
-            write(
-                &backup_save_file,
-                ron::to_string(save_data).map_err(SaveError::Serialize)?,
-            )
-            .await
-            .map_err(SaveError::Write)?;
-            Ok::<_, SaveError>(())
-        },
-    )
-    .await
-    .unwrap();
-    println!("Backed up snapshot backup0");
-    remove_file(backup_save_file).await.unwrap();
-
-    let backup_save_file = "./dev/save_data_backup0_backup1.ron";
-    backup(
-        match read_to_string(backup_save_file).await {
+        match read_to_string(&save_data_path).await {
             Ok(s) => ron::from_str(&s)
                 .inspect_err(|e| {
                     println!("Error parsing save data: {e}. File might have gotten corrupted")
@@ -157,16 +107,16 @@ async fn main() {
             }
         },
         ZfsSnapshot {
-            zpool: zpool.into(),
-            dataset: dataset.into(),
-            snapshot_name: "backup1".into(),
+            zpool: &zpool,
+            dataset: &dataset,
+            snapshot_name: &snapshot,
         },
-        Some(backup0_snapshot.snapshot_name.clone()),
-        &PathBuf::from("./dev/backup0_backup1"),
+        diff_from.as_deref(),
+        &PathBuf::from(temp_path),
         S3Dest {
-            bucket: "test",
-            object_key: "backup0_backup1",
-            storage_class: StorageClass::Standard,
+            bucket: &bucket,
+            object_key: &object_key,
+            storage_class,
         },
         &client,
         &mut (Box::new(NoOpAmountLimiter2)
@@ -175,7 +125,7 @@ async fn main() {
         chunk_size,
         &mut async |save_data| {
             write(
-                &backup_save_file,
+                &save_data_path,
                 ron::to_string(save_data).map_err(SaveError::Serialize)?,
             )
             .await
@@ -185,6 +135,6 @@ async fn main() {
     )
     .await
     .unwrap();
-    println!("Backed up incremental snapshot from backup0 to backup1");
-    remove_file(backup_save_file).await.unwrap();
+    println!("Done");
+    remove_file(&save_data_path).await.unwrap();
 }
