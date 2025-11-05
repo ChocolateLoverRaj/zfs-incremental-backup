@@ -18,7 +18,7 @@ use std::{
     path::PathBuf,
 };
 
-use aws_config::Region;
+use aws_config::{BehaviorVersion, Region};
 use aws_sdk_s3::{config::Credentials, types::StorageClass};
 use clap::Parser;
 use rcs3ud::{
@@ -50,6 +50,9 @@ struct Cli {
     object_key: String,
     #[arg(long, value_parser = parse_storage_class)]
     storage_class: StorageClass,
+    /// Use development S3 server (minio)
+    #[arg(long)]
+    dev: bool,
 }
 
 fn parse_storage_class(storage_class: &str) -> Result<StorageClass, String> {
@@ -69,21 +72,27 @@ async fn main() {
         bucket,
         object_key,
         storage_class,
+        dev,
     } = Cli::parse();
-    let config = aws_sdk_s3::config::Builder::default()
-        .behavior_version_latest()
-        .endpoint_url("http://localhost:9000")
-        .credentials_provider(Credentials::new(
-            "minioadmin",
-            "minioadmin",
-            None,
-            None,
-            "minio",
-        ))
-        .region(Region::from_static("us-west-2"))
-        .force_path_style(true)
-        .build();
-    let client = aws_sdk_s3::Client::from_conf(config);
+    let client = if dev {
+        aws_sdk_s3::Client::from_conf(
+            aws_sdk_s3::config::Builder::default()
+                .behavior_version_latest()
+                .endpoint_url("http://localhost:9000")
+                .credentials_provider(Credentials::new(
+                    "minioadmin",
+                    "minioadmin",
+                    None,
+                    None,
+                    "minio",
+                ))
+                .region(Region::from_static("us-west-2"))
+                .force_path_style(true)
+                .build(),
+        )
+    } else {
+        aws_sdk_s3::Client::new(&aws_config::load_defaults(BehaviorVersion::latest()).await)
+    };
 
     #[allow(unused)]
     #[derive(Debug)]
