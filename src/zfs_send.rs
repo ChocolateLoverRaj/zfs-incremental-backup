@@ -4,6 +4,7 @@ use tokio::process::Command;
 
 use crate::zfs_snapshot::ZfsSnapshot;
 
+#[allow(unused)]
 #[derive(Debug)]
 pub enum ZfsSendError {
     Spawn(tokio::io::Error),
@@ -20,7 +21,7 @@ pub async fn zfs_send(
     let mut command = Command::new("zfs");
     command.arg("send").arg("-w");
     if let Some(diff_from) = diff_from {
-        command.arg("-i").arg(diff_from);
+        command.arg("-i").arg(format!("@{diff_from}"));
     }
     let exit_status = command
         .arg(zfs_snapshot.to_string())

@@ -16,16 +16,13 @@ use std::{
     env::current_dir,
     io::{self, ErrorKind},
     path::PathBuf,
-    str::FromStr,
 };
 
-use aws_config::{BehaviorVersion, Region, meta::region::RegionProviderChain};
-use aws_sdk_s3::{
-    Client,
-    config::{Credentials, endpoint::Endpoint},
-    primitives::ByteStream,
-};
-use tokio::fs::{OpenOptions, read_to_string, write};
+use async_trait::async_trait;
+use aws_config::Region;
+use aws_sdk_s3::{config::Credentials, types::StorageClass};
+use rcs3ud::S3Dest;
+use tokio::fs::{OpenOptions, read_to_string, remove_file, write};
 
 use crate::{
     backup::{BackupCallbacks, BackupSaveData, backup},
@@ -94,21 +91,6 @@ async fn main() {
         snapshot_name: "backup0".into(),
     };
 
-    let backup_save_file = "./dev/save_data.ron";
-    let save_data = match read_to_string(backup_save_file).await {
-        Ok(s) => ron::from_str(&s)
-            .inspect_err(|e| {
-                println!("Error parsing save data: {e}. File might have gotten corrupted")
-            })
-            .unwrap_or_default(),
-        Err(e) => {
-            if e.kind() == ErrorKind::NotFound {
-                Default::default()
-            } else {
-                Err(e).unwrap()
-            }
-        }
-    };
     #[derive(Debug)]
     struct MyBackupCallbacks(PathBuf);
     #[derive(Debug)]
@@ -116,6 +98,7 @@ async fn main() {
         Serialize(ron::Error),
         Write(io::Error),
     }
+    #[async_trait]
     impl BackupCallbacks for MyBackupCallbacks {
         type SaveError = SaveError;
 
@@ -126,55 +109,72 @@ async fn main() {
             Ok(())
         }
     }
+
+    let backup_save_file = "./dev/save_data_backup0.ron";
     backup(
-        save_data,
+        match read_to_string(backup_save_file).await {
+            Ok(s) => ron::from_str(&s)
+                .inspect_err(|e| {
+                    println!("Error parsing save data: {e}. File might have gotten corrupted")
+                })
+                .unwrap_or_default(),
+            Err(e) => {
+                if e.kind() == ErrorKind::NotFound {
+                    Default::default()
+                } else {
+                    Err(e).unwrap()
+                }
+            }
+        },
         backup0_snapshot,
         None,
         "./dev/backup0".into(),
         &mut MyBackupCallbacks(backup_save_file.into()),
+        S3Dest {
+            bucket: "test",
+            object_key: "backup0",
+            storage_class: StorageClass::Standard,
+        },
+        &client,
     )
     .await
     .unwrap();
+    println!("Backed up snapshot backup0");
+    remove_file(backup_save_file).await.unwrap();
 
-    // let output = zfs_ensure_snapshot(backup0_snapshot.clone()).await.unwrap();
-    // println!("{output:#?}");
-    // zfs_send(
-    //     backup0_snapshot,
-    //     None,
-    //     OpenOptions::new()
-    //         .create(true)
-    //         .write(true)
-    //         .open("dev/backup0")
-    //         .await
-    //         .unwrap()
-    //         .into_std()
-    //         .await
-    //         .into(),
-    // )
-    // .await
-    // .unwrap();
-
-    // let backup1_snapshot_name = "backup1";
-    // let backup1_snapshot = ZfsSnapshot {
-    //     zpool: zpool.into(),
-    //     dataset: dataset.into(),
-    //     snapshot_name: backup1_snapshot_name.into(),
-    // };
-    // let output = zfs_ensure_snapshot(backup1_snapshot.clone()).await.unwrap();
-    // println!("{output:#?}");
-    // zfs_send(
-    //     backup1_snapshot,
-    //     None,
-    //     OpenOptions::new()
-    //         .create(true)
-    //         .write(true)
-    //         .open("dev/backup0_backup1")
-    //         .await
-    //         .unwrap()
-    //         .into_std()
-    //         .await
-    //         .into(),
-    // )
-    // .await
-    // .unwrap();
+    let backup_save_file = "./dev/save_data_backup0_backup1.ron";
+    backup(
+        match read_to_string(backup_save_file).await {
+            Ok(s) => ron::from_str(&s)
+                .inspect_err(|e| {
+                    println!("Error parsing save data: {e}. File might have gotten corrupted")
+                })
+                .unwrap_or_default(),
+            Err(e) => {
+                if e.kind() == ErrorKind::NotFound {
+                    Default::default()
+                } else {
+                    Err(e).unwrap()
+                }
+            }
+        },
+        ZfsSnapshot {
+            zpool: zpool.into(),
+            dataset: dataset.into(),
+            snapshot_name: "backup1".to_string(),
+        },
+        Some("backup0".to_string()),
+        "./dev/backup0_backup1".into(),
+        &mut MyBackupCallbacks(backup_save_file.into()),
+        S3Dest {
+            bucket: "test",
+            object_key: "backup0_backup1",
+            storage_class: StorageClass::Standard,
+        },
+        &client,
+    )
+    .await
+    .unwrap();
+    println!("Backed up incremental snapshot from backup0 to backup1");
+    remove_file(backup_save_file).await.unwrap();
 }
