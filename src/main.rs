@@ -112,7 +112,7 @@ async fn main() {
                 }
             }
         },
-        backup0_snapshot,
+        backup0_snapshot.clone(),
         None,
         &PathBuf::from("./dev/backup0"),
         S3Dest {
@@ -161,7 +161,7 @@ async fn main() {
             dataset: dataset.into(),
             snapshot_name: "backup1".into(),
         },
-        None,
+        Some(backup0_snapshot.snapshot_name.clone()),
         &PathBuf::from("./dev/backup0_backup1"),
         S3Dest {
             bucket: "test",
