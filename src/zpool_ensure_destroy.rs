@@ -4,6 +4,7 @@ use crate::{
     zpool_list::{ZpoolListError, zpool_list},
 };
 
+#[allow(unused)]
 #[derive(Debug)]
 pub enum ZpoolEnsureDestroyError {
     ZpoolDestroyError(CommandError),

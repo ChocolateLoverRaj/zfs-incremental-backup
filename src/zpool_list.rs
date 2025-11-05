@@ -10,6 +10,7 @@ struct ZpoolListOutput {
     pools: HashMap<String, ()>,
 }
 
+#[allow(unused)]
 #[derive(Debug)]
 pub enum ZpoolListError {
     Command(CommandError),

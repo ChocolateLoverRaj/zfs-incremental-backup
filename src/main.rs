@@ -15,22 +15,20 @@ mod zpool_list;
 use std::{
     env::current_dir,
     io::{self, ErrorKind},
+    num::NonZero,
     path::PathBuf,
 };
 
-use async_trait::async_trait;
 use aws_config::Region;
 use aws_sdk_s3::{config::Credentials, types::StorageClass};
-use rcs3ud::S3Dest;
+use rcs3ud::{
+    AmountLimiter2, NoOpAmountLimiter2, NoOpOperationScheduler2, OperationScheduler2, S3Dest,
+};
 use tokio::fs::{OpenOptions, read_to_string, remove_file, write};
 
 use crate::{
-    backup::{BackupCallbacks, BackupSaveData, backup},
-    zfs_create::zfs_create,
-    zfs_dataset::ZfsDataset,
-    zfs_snapshot::ZfsSnapshot,
-    zpool_create::zpool_create,
-    zpool_ensure_destroy::zpool_ensure_destroy,
+    backup::backup, zfs_create::zfs_create, zfs_dataset::ZfsDataset, zfs_snapshot::ZfsSnapshot,
+    zpool_create::zpool_create, zpool_ensure_destroy::zpool_ensure_destroy,
 };
 
 #[tokio::main]
@@ -91,25 +89,13 @@ async fn main() {
         snapshot_name: "backup0".into(),
     };
 
-    #[derive(Debug)]
-    struct MyBackupCallbacks(PathBuf);
+    #[allow(unused)]
     #[derive(Debug)]
     enum SaveError {
         Serialize(ron::Error),
         Write(io::Error),
     }
-    #[async_trait]
-    impl BackupCallbacks for MyBackupCallbacks {
-        type SaveError = SaveError;
-
-        async fn save(&mut self, data: &BackupSaveData) -> Result<(), Self::SaveError> {
-            write(&self.0, ron::to_string(data).map_err(SaveError::Serialize)?)
-                .await
-                .map_err(SaveError::Write)?;
-            Ok(())
-        }
-    }
-
+    let chunk_size = NonZero::new(30_000).unwrap();
     let backup_save_file = "./dev/save_data_backup0.ron";
     backup(
         match read_to_string(backup_save_file).await {
@@ -128,14 +114,26 @@ async fn main() {
         },
         backup0_snapshot,
         None,
-        "./dev/backup0".into(),
-        &mut MyBackupCallbacks(backup_save_file.into()),
+        &PathBuf::from("./dev/backup0"),
         S3Dest {
             bucket: "test",
             object_key: "backup0",
             storage_class: StorageClass::Standard,
         },
         &client,
+        &mut (Box::new(NoOpAmountLimiter2)
+            as Box<dyn AmountLimiter2<ReserveError = (), MarkUsedError = ()> + Send>),
+        &mut (Box::new(NoOpOperationScheduler2) as Box<dyn OperationScheduler2 + Send>),
+        chunk_size,
+        &mut async |save_data| {
+            write(
+                &backup_save_file,
+                ron::to_string(save_data).map_err(SaveError::Serialize)?,
+            )
+            .await
+            .map_err(SaveError::Write)?;
+            Ok::<_, SaveError>(())
+        },
     )
     .await
     .unwrap();
@@ -161,17 +159,29 @@ async fn main() {
         ZfsSnapshot {
             zpool: zpool.into(),
             dataset: dataset.into(),
-            snapshot_name: "backup1".to_string(),
+            snapshot_name: "backup1".into(),
         },
-        Some("backup0".to_string()),
-        "./dev/backup0_backup1".into(),
-        &mut MyBackupCallbacks(backup_save_file.into()),
+        None,
+        &PathBuf::from("./dev/backup0_backup1"),
         S3Dest {
             bucket: "test",
             object_key: "backup0_backup1",
             storage_class: StorageClass::Standard,
         },
         &client,
+        &mut (Box::new(NoOpAmountLimiter2)
+            as Box<dyn AmountLimiter2<ReserveError = (), MarkUsedError = ()> + Send>),
+        &mut (Box::new(NoOpOperationScheduler2) as Box<dyn OperationScheduler2 + Send>),
+        chunk_size,
+        &mut async |save_data| {
+            write(
+                &backup_save_file,
+                ron::to_string(save_data).map_err(SaveError::Serialize)?,
+            )
+            .await
+            .map_err(SaveError::Write)?;
+            Ok::<_, SaveError>(())
+        },
     )
     .await
     .unwrap();

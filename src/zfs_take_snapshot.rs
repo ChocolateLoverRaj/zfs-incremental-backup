@@ -4,6 +4,7 @@ use tokio::process::Command;
 
 use crate::zfs_snapshot::ZfsSnapshot;
 
+#[allow(unused)]
 #[derive(Debug)]
 pub enum ZfsTakeSnapshotError {
     CommandError(tokio::io::Error),

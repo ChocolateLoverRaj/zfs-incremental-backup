@@ -1,9 +1,11 @@
-use std::{io, path::PathBuf};
+use std::{io, num::NonZeroUsize, path::Path};
 
-use async_trait::async_trait;
-use rcs3ud::{S3Dest, UploadCallbacks, UploadError2, UploadSaveData, UploadSrc2, upload_2};
+use rcs3ud::{
+    AmountLimiter2, OperationScheduler2, S3Dest, UploadChunkedError2, UploadChunkedSaveData2,
+    upload_chunked_2,
+};
 use serde::{Deserialize, Serialize};
-use tokio::fs::{OpenOptions, metadata, remove_file};
+use tokio::fs::{OpenOptions, remove_file};
 
 use crate::{
     zfs_ensure_snapshot::{ZfsEnsureSnapshotError, zfs_ensure_snapshot},
@@ -16,64 +18,43 @@ pub enum BackupSaveData {
     #[default]
     CreatingSnapshot,
     SendingToFile,
-    Uploading(UploadSaveData),
+    Uploading(UploadChunkedSaveData2),
     RemovingFile,
-}
-
-#[async_trait]
-pub trait BackupCallbacks {
-    type SaveError;
-
-    async fn save(&mut self, data: &BackupSaveData) -> Result<(), Self::SaveError>;
-}
-
-struct Callbacks<'a, SaveError> {
-    callbacks: &'a mut dyn BackupCallbacks<SaveError = SaveError>,
-}
-impl<SaveError> UploadCallbacks for Callbacks<'_, SaveError> {
-    type ReserveError = ();
-    type MarkUsedError = ();
-    type SaveError = SaveError;
-    async fn save(&mut self, data: &UploadSaveData) -> Result<(), Self::SaveError> {
-        self.callbacks
-            .save(&BackupSaveData::Uploading(data.clone()))
-            .await?;
-        Ok(())
-    }
 }
 
 #[allow(unused)]
 #[derive(Debug)]
-pub enum BackupError<C: BackupCallbacks> {
+pub enum BackupError<ReserveError, MarkUsedError, SaveError> {
     Snapshot(ZfsEnsureSnapshotError),
-    Save(C::SaveError),
+    Save(SaveError),
     Open(io::Error),
     Send(ZfsSendError),
-    Metadata(io::Error),
-    Upload(UploadError2<(), (), C::SaveError>),
+    Upload(UploadChunkedError2<ReserveError, MarkUsedError, SaveError>),
     RemoveFile(io::Error),
 }
 
 /// Takes a snapshot, does `zfs send -w` to a file, and then uploads the file to S3.
 /// Can be incremental from a previous snapshot.
-pub async fn backup<C: BackupCallbacks>(
+pub async fn backup<ReserveError, MarkUsedError, SaveError>(
     mut save_data: BackupSaveData,
     zfs_snapshot: ZfsSnapshot,
     diff_from: Option<String>,
-    file_path: PathBuf,
-    callbacks: &mut C,
+    file_path: &Path,
     dest: S3Dest<'_>,
     client: &aws_sdk_s3::Client,
-) -> Result<(), BackupError<C>> {
+    amount_limiter: &mut Box<
+        dyn AmountLimiter2<ReserveError = ReserveError, MarkUsedError = MarkUsedError> + Send,
+    >,
+    operation_scheduler: &mut Box<dyn OperationScheduler2 + Send>,
+    chunk_size: NonZeroUsize,
+    save: &mut impl AsyncFnMut(&BackupSaveData) -> Result<(), SaveError>,
+) -> Result<(), BackupError<ReserveError, MarkUsedError, SaveError>> {
     if matches!(save_data, BackupSaveData::CreatingSnapshot) {
         zfs_ensure_snapshot(zfs_snapshot.clone())
             .await
             .map_err(BackupError::Snapshot)?;
         save_data = BackupSaveData::SendingToFile;
-        callbacks
-            .save(&save_data)
-            .await
-            .map_err(BackupError::Save)?;
+        save(&save_data).await.map_err(BackupError::Save)?;
     }
     if matches!(save_data, BackupSaveData::SendingToFile) {
         let file = OpenOptions::new()
@@ -87,35 +68,27 @@ pub async fn backup<C: BackupCallbacks>(
             .await
             .map_err(BackupError::Send)?;
         save_data = BackupSaveData::Uploading(Default::default());
-        callbacks
-            .save(&save_data)
-            .await
-            .map_err(BackupError::Save)?;
+        save(&save_data).await.map_err(BackupError::Save)?;
     }
-    if let BackupSaveData::Uploading(upload_save_data) = save_data {
-        let len = metadata(&file_path)
-            .await
-            .map_err(BackupError::Metadata)?
-            .len();
-        upload_2(
+    if let BackupSaveData::Uploading(upload_save_data) = &save_data {
+        upload_chunked_2(
             client,
-            UploadSrc2 {
-                path: &file_path,
-                offset: 0,
-                len: len.try_into().unwrap(),
-            },
+            file_path,
             dest,
-            &mut Callbacks { callbacks },
-            Default::default(),
-            upload_save_data,
+            chunk_size,
+            upload_save_data.clone(),
+            amount_limiter,
+            operation_scheduler,
+            &mut async |upload_save_data| {
+                save_data = BackupSaveData::Uploading(upload_save_data.clone());
+                save(&save_data).await?;
+                Ok(())
+            },
         )
         .await
         .map_err(BackupError::Upload)?;
         save_data = BackupSaveData::RemovingFile;
-        callbacks
-            .save(&save_data)
-            .await
-            .map_err(BackupError::Save)?;
+        save(&save_data).await.map_err(BackupError::Save)?;
     }
     if let BackupSaveData::RemovingFile = save_data {
         remove_file(&file_path)

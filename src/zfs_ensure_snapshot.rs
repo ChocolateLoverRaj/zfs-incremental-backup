@@ -4,6 +4,7 @@ use crate::{
     zfs_take_snapshot::{ZfsTakeSnapshotError, zfs_take_snapshot},
 };
 
+#[allow(unused)]
 #[derive(Debug)]
 pub enum ZfsEnsureSnapshotError {
     TakeSnapshot(ZfsTakeSnapshotError),
