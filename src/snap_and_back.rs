@@ -11,8 +11,9 @@ use rcs3ud::{
     AmountLimiter2, NoOpAmountLimiter2, NoOpOperationScheduler2, OperationScheduler2, S3Dest,
 };
 use tokio::fs::{read_to_string, remove_file, write};
+use zfs_wrapper::ZfsSnapshot;
 
-use crate::{backup::backup, parse_storage_class::parse_storage_class, zfs_snapshot::ZfsSnapshot};
+use crate::{backup::backup, parse_storage_class::parse_storage_class};
 
 #[derive(Debug, Parser)]
 pub struct Cli {

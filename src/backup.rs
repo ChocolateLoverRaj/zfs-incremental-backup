@@ -7,10 +7,8 @@ use rcs3ud::{
 use serde::{Deserialize, Serialize};
 use tokio::fs::{OpenOptions, remove_file};
 
-use crate::{
-    zfs_ensure_snapshot::{ZfsEnsureSnapshotError, zfs_ensure_snapshot},
-    zfs_send::{ZfsSendError, zfs_send},
-    zfs_snapshot::ZfsSnapshot,
+use zfs_wrapper::{
+    ZfsEnsureSnapshotError, ZfsSendError, ZfsSnapshot, zfs_ensure_snapshot, zfs_send,
 };
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]

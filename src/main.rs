@@ -1,21 +1,9 @@
 mod auto_back;
 mod auto_back_cli;
 mod backup;
-mod command_error;
 mod init_auto_back_cli;
 mod parse_storage_class;
 mod snap_and_back;
-mod zfs_create;
-mod zfs_dataset;
-mod zfs_ensure_snapshot;
-mod zfs_send;
-mod zfs_snapshot;
-mod zfs_snapshot_exists;
-mod zfs_take_snapshot;
-mod zpool_create;
-mod zpool_destroy;
-mod zpool_ensure_destroy;
-mod zpool_list;
 
 use clap::{Parser, Subcommand};
 

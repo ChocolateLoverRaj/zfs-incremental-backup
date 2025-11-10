@@ -3245,4 +3245,14 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "zfs_wrapper",
+]
+
+[[package]]
+name = "zfs_wrapper"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tokio",
 ]

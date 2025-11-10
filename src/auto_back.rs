@@ -3,12 +3,9 @@ use std::{borrow::Cow, num::NonZero, path::Path};
 use aws_sdk_s3::types::StorageClass;
 use rcs3ud::{AmountLimiter2, OperationScheduler2, S3Dest};
 use serde::{Deserialize, Serialize};
+use zfs_wrapper::{ZfsDataset, ZfsSnapshot};
 
-use crate::{
-    backup::{BackupError, BackupSaveData, backup},
-    zfs_dataset::ZfsDataset,
-    zfs_snapshot::ZfsSnapshot,
-};
+use crate::backup::{BackupError, BackupSaveData, backup};
 
 /// Actual data
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]

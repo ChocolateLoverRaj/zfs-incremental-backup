@@ -1,8 +1,9 @@
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use tokio::{fs::OpenOptions, io::AsyncWriteExt};
+use zfs_wrapper::ZfsDataset;
 
-use crate::{auto_back::AutoBackupState, zfs_dataset::ZfsDataset};
+use crate::auto_back::AutoBackupState;
 
 /// Configuration that should not change for the lifetime of this file, unless you change the zpool / dataset name
 #[derive(Debug, Clone, Serialize, Deserialize)]
