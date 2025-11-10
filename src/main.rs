@@ -1,9 +1,8 @@
-mod auto_back;
-mod auto_back_cli;
 mod backup;
-mod init_auto_back_cli;
+mod init_cli;
 mod parse_storage_class;
-mod snap_and_back;
+mod run;
+mod run_cli;
 
 use clap::{Parser, Subcommand};
 
@@ -15,17 +14,15 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
-    SnapAndBack(snap_and_back::Cli),
-    InitAutoBack(init_auto_back_cli::Cli),
-    AutoBack(auto_back_cli::Cli),
+    Init(init_cli::Cli),
+    Run(run_cli::Cli),
 }
 
 #[tokio::main]
 async fn main() {
     let Cli { command } = Cli::parse();
     match command {
-        Commands::SnapAndBack(command) => snap_and_back::snap_and_back(command).await,
-        Commands::InitAutoBack(command) => init_auto_back_cli::init_auto_back(command).await,
-        Commands::AutoBack(command) => auto_back_cli::auto_back_cli(command).await,
+        Commands::Init(command) => init_cli::init_cli(command).await,
+        Commands::Run(command) => run_cli::run_cli(command).await,
     }
 }

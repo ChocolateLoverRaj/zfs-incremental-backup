@@ -1,7 +1,7 @@
 use crate::{
-    auto_back::auto_back,
-    init_auto_back_cli::{AutoBackupConfig, AutoBackupFileData},
+    init_cli::{AutoBackupConfig, AutoBackupFileData},
     parse_storage_class::parse_storage_class,
+    run::run,
 };
 use aws_config::{BehaviorVersion, Region};
 use aws_sdk_s3::{config::Credentials, types::StorageClass};
@@ -42,7 +42,7 @@ pub struct Cli {
     dev: bool,
 }
 
-pub async fn auto_back_cli(
+pub async fn run_cli(
     Cli {
         save_data_path,
         temp_dir,
@@ -80,7 +80,7 @@ pub async fn auto_back_cli(
         snapshot_prefix,
         object_prefix,
     } = file_data.config.clone();
-    auto_back(
+    run(
         file_data.state.clone(),
         dataset,
         &bucket,

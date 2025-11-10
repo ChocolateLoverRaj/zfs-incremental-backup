@@ -23,9 +23,9 @@ pub enum AutoBackError<ReserveError, MarkUsedError, SaveError> {
 /// Takes a snapshot and backs it up, or completes the previous unfinished operation.
 /// The snapshot name is automatic and incremental starting at 0.
 /// Always does an incremental backup from the last backed up snapshot.
-pub async fn auto_back<ReserveError, MarkUsedError, SaveError>(
+pub async fn run<ReserveError, MarkUsedError, SaveError>(
     mut save_data: AutoBackupState,
-    dataset: ZfsDataset,
+    dataset: ZfsDataset<'_>,
     bucket: &str,
     snapshot_prefix: &str,
     object_prefix: &str,
@@ -58,9 +58,8 @@ pub async fn auto_back<ReserveError, MarkUsedError, SaveError>(
     backup(
         save_data.backing_up_progress.clone().unwrap_or_default(),
         ZfsSnapshot {
-            zpool: &dataset.zpool,
-            dataset: &dataset.dataset,
-            snapshot_name: &snapshot_name,
+            dataset: dataset.clone(),
+            snapshot_name: snapshot_name.into(),
         },
         previous_snapshot_name.as_deref(),
         &file_path,

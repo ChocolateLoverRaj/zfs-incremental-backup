@@ -3,12 +3,12 @@ use serde::{Deserialize, Serialize};
 use tokio::{fs::OpenOptions, io::AsyncWriteExt};
 use zfs_wrapper::ZfsDataset;
 
-use crate::auto_back::AutoBackupState;
+use crate::run::AutoBackupState;
 
 /// Configuration that should not change for the lifetime of this file, unless you change the zpool / dataset name
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AutoBackupConfig {
-    pub dataset: ZfsDataset,
+pub struct AutoBackupConfig<'a> {
+    pub dataset: ZfsDataset<'a>,
     pub bucket: String,
     pub snapshot_prefix: String,
     pub object_prefix: String,
@@ -16,8 +16,8 @@ pub struct AutoBackupConfig {
 
 /// The config and state are in the same file so that the user doesn't accidentally specify the wrong config and state
 #[derive(Debug, Serialize, Deserialize)]
-pub struct AutoBackupFileData {
-    pub config: AutoBackupConfig,
+pub struct AutoBackupFileData<'a> {
+    pub config: AutoBackupConfig<'a>,
     pub state: AutoBackupState,
 }
 
@@ -43,7 +43,7 @@ pub struct Cli {
     save_data_path: String,
 }
 
-pub async fn init_auto_back(
+pub async fn init_cli(
     Cli {
         zpool,
         dataset,
@@ -63,7 +63,10 @@ pub async fn init_auto_back(
             ron::ser::to_string_pretty(
                 &AutoBackupFileData {
                     config: AutoBackupConfig {
-                        dataset: ZfsDataset { zpool, dataset },
+                        dataset: ZfsDataset {
+                            zpool: zpool.into(),
+                            dataset: dataset.into(),
+                        },
                         snapshot_prefix,
                         object_prefix,
                         bucket,
