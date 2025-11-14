@@ -14,6 +14,7 @@ pub struct AutoBackupState {
     pub backing_up_progress: Option<BackupSaveData>,
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub enum AutoBackError<ReserveError, MarkUsedError, SaveError> {
     Backup(BackupError<ReserveError, MarkUsedError, SaveError>),
@@ -64,7 +65,7 @@ pub async fn run<ReserveError, MarkUsedError, SaveError>(
         previous_snapshot_name.as_deref(),
         &file_path,
         S3Dest {
-            bucket: &bucket,
+            bucket: bucket,
             object_key: &object_key,
             storage_class,
         },

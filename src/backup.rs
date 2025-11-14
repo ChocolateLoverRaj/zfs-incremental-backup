@@ -20,7 +20,7 @@ pub enum BackupSaveData {
     RemovingFile,
 }
 
-#[allow(unused)]
+#[allow(unused, clippy::large_enum_variant)]
 #[derive(Debug)]
 pub enum BackupError<ReserveError, MarkUsedError, SaveError> {
     Snapshot(ZfsEnsureSnapshotError),
@@ -33,6 +33,7 @@ pub enum BackupError<ReserveError, MarkUsedError, SaveError> {
 
 /// Takes a snapshot, does `zfs send -w` to a file, and then uploads the file to S3.
 /// Can be incremental from a previous snapshot.
+#[allow(clippy::too_many_arguments)]
 pub async fn backup<ReserveError, MarkUsedError, SaveError>(
     mut save_data: BackupSaveData,
     zfs_snapshot: ZfsSnapshot<'_>,
