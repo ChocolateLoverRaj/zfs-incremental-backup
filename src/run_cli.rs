@@ -40,6 +40,8 @@ pub struct Cli {
     /// Use development S3 server (minio)
     #[arg(long)]
     dev: bool,
+    #[arg(long, default_value = "http://localhost:9000")]
+    dev_endpoint: String,
 }
 
 pub async fn run_cli(
@@ -49,13 +51,14 @@ pub async fn run_cli(
         storage_class,
         chunk_size,
         dev,
+        dev_endpoint,
     }: Cli,
 ) {
     let client = if dev {
         aws_sdk_s3::Client::from_conf(
             aws_sdk_s3::config::Builder::default()
                 .behavior_version_latest()
-                .endpoint_url("http://localhost:9000")
+                .endpoint_url(dev_endpoint)
                 .credentials_provider(Credentials::new(
                     "minioadmin",
                     "minioadmin",
@@ -63,7 +66,7 @@ pub async fn run_cli(
                     None,
                     "minio",
                 ))
-                .region(Region::from_static("us-west-2"))
+                .region(Region::from_static("us-east-1"))
                 .force_path_style(true)
                 .build(),
         )

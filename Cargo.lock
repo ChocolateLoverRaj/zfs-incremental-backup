@@ -1942,6 +1942,7 @@ dependencies = [
 [[package]]
 name = "rcs3ud"
 version = "0.1.0"
+source = "git+https://github.com/ChocolateLoverRaj/rcs3ud?rev=68f0642cf3694ed03b733a3015cd779a2ac4b4d9#68f0642cf3694ed03b733a3015cd779a2ac4b4d9"
 dependencies = [
  "async-trait",
  "aws-sdk-s3",
@@ -3251,6 +3252,7 @@ dependencies = [
 [[package]]
 name = "zfs_wrapper"
 version = "0.1.0"
+source = "git+https://github.com/ChocolateLoverRaj/zfs_wrapper?rev=b4a6eb871dc86d1ac7bb0ceb8d3d3550e9d7dd6a#b4a6eb871dc86d1ac7bb0ceb8d3d3550e9d7dd6a"
 dependencies = [
  "serde",
  "serde_json",

@@ -13,3 +13,8 @@ docker compose down
 rm -r ./dev/minio_data
 # Start mino container
 docker compose up -d
+# Wait for it to be online
+sleep 10
+# Create the bucket "test"
+mc alias set minio http://localhost:9000 minioadmin minioadmin
+mc mb minio/test
