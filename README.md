@@ -1,47 +1,66 @@
-> [!CAUTION]
-> I am no longer working on this and I'm not planning to work on this. Don't try using it unless you want to continue development of it yourself. I recommend [Rustic](https://github.com/rustic-rs/rustic). That is what I will be using If I need a sophisticated backup solution with cold storage.
-
 # ZFS Incremental Backup
-Backup ZFS datasets to AWS S3 Glacier Deep to save forever
+A solution to incrementally backup ZFS datasets to S3 cold storage.
 
-## Requirements
-- Cost-effective. Uses AWS in the cheapest way possible (well, there is room for improvement).
-- Incremental, so you only upload the new data that previous uploads don't already have.
+## How it works
+- Use any ZFS dataset
+- This program takes a snapshot when you run it. You can customize the snapshot naming pattern.
+- This program uses `zfs send` and then uploads its output to S3. For the lowest cost, use the "coldest" storage available, such as `DEEP_ARCHIVE` on AWS. Files are uploaded in chunks as multiple S3 objects to avoid multi-part uploads, which are super expensive. 
+- That's it! All of the hard work is done by ZFS itself.
+
+## Restoring data
+I didn't write a program to restore, mostly because automatically restoring and downloading cold objects is tricky. But the structure is very simple, so you should be able to manually restore or write a script / program to do it. To download a snapshot / diff, download all of the chunks (labeled `0`, `1`, `2`, etc), and concatenate them. Then input that file into `zfs receive`. Start with the first snapshot (`backup0`), and then apply the incremental diffs to restore the next snapshot (`backup0_backup1`, `backup1_backup2`, etc).
 
 ## What this is made for
-- When you take photos and videos and you want to save them **forever**
-- You want to have that 99.999999999% (idk about you but I round this up to 100%) data durability, so that even if your other backups are unaccessible you can still recover the photos later
-- You don't urgently need the photos. You can wait 2 days, or even months, to re-download all the photos. It's not about being able to see the photos at a given time. It's about *being able* to see the photos, even if you never look at them again. Cuz you spent so long taking them and organizing them, that it would be sad if you lost them (even if you never look at them again).
-- You will not be deleting or modifying the photos. This backup tool does not do data deduplication so modifying/deleting could result in extra backup space used.
-- You are okay with the files not being compressed. This is fine for photos and videos cuz they are already optimally compressed anyways. Compression could be added to this tool but for now to keep it simple it will not compress/decompress.
-- You don't need extended attributes on the data. This tool does not handle extended attributes.
-- When restoring, you want to restore the whole dataset and not specific files or folders
-
-## Why did I make this and not use one of the bajillion existing tools?
-- I don't want to store metadata in Standard S3 storage cuz it's expensive
-- I want a tool that takes advantages of file systems with snapshots, so the backup solution doesn't need to add a snapshot "layer" on top of the FS
-- I want a tool that works well specifically with AWS S3 Glacier Deep
-- I want a tool that will spread out recovering data between multiple months to not go over the AWS 100GB/mo free download limit
-- I want a tool that will efficiently retry when uploads / downloads fail
-- I did not find an existing tool that restores Glacier Deep objects into Standard objects, waits until they are restored (could take 48 hours), and then downloads them
+This program is optimized for when you have ZFS datasets where you only add files, not delete them. This way, it frequently can back up your dataset using `zfs snapshot` and `zfs send -i`. Only the S3 PUT operation needs to be used, making this work nicely with cold storage.
+ects into Standard objects, waits until they are restored (could take 48 hours), and then downloads them
 
 ## Features
 - Backs up ZFS snapshots (incrementally) to AWS S3 Glacier Deep
-- Encrypting the data stored in AWS so Amazon cannot read the **contents** of files
-- Uses [multi-part uploads](https://docs.aws.amazon.com/AmazonS3/latest/userguide/mpuoverview.html) to efficiently handle large interrupted uploads
-- Only uploads the difference between two snapshots
-- If, after 6 months, data stored on AWS could be reduced by re-uploading an entire snapshot and deleting the incremental changes, it will do that to save money
-- Rust library as well as CLI, for flexibility in how you use this tool. You can make your custom program, scripts, and automation, or manually use the CLI.
-- Handles restoring from AWS S3 Glacier Deep
-- Spreads out downloads between multiple months to avoid AWS download costs after the 100GB of free downloads is used
+- Uses the `-w` flag when doing `zfs send`, so encrypted datasets stay encrypted as they are on S3
+- Will gracefully continue its operation where it left off in the event of a program crash
+- Purposely does not use multi-part uploads to save money
+- Specifically designed for use with ZFS to let ZFS do the heavy lifting  
 
-## How it works
-I did not write the code yet. Here is the plan (not fully planned).
-### Create a ZFS dataset
-You could use BTRFS or some other fs which can do snapshots, but for now it is made for ZFS.
+## Installation
+This program is written in [Rust](https://rust-lang.org/) and packaged with [Nix](https://nixos.org/). This program contains a `flake.nix`, so installing through Nix is as simple as importing this flake.
 
-## Getting started
-### Create an AWS acccount
+## Development / Building Manually
+First, install Rust. Then, run `cargo build` to build.
+
+## Testing
+`flake.nix` contains an integration test involving three NixOS virtual machines. See https://nixos.org/manual/nixos/stable/#sec-call-nixos-test-outside-nixos for information about how it works.
+
+## Usage
+### Initialize
+This program stores its state in a file. Figure out where you will store the file. I recommend storing the file in a different dataset within the same.
+```bash
+zfs-incremental-backup init --help
+```
+for a full list of inputs.
+
+#### `--snapshot-fix`
+I recommend making this `"backup"`
+
+#### `--object-prefix`
+If your S3 bucket is entirely dedicated to backing up a single ZFS dataset with this program, leave it as `""`. If you want to dedicate a specific "folder" in the S3 bucket for this tool, make this `"folder/"` (remember the trailing `/`).
+
+### Run a backup
+The `run` subcommand will either resume a previous interrupted backup operation, or it will create and back up a new snapshot. This program also needs a directory to store temporary files (which include the entire output of `zfs send`). You will probably not have enough RAM for the temporary files to be stored in RAM. So keep it in a place with enough disk space.
+
+#### `--storage-class`
+Do your research to figure out which one you want to use. I use `DEEP_ARCHIVE` for the lowest cost.
+
+#### `--chunk-size`
+If using AWS, set this to `5000000000` (5GB), which is the largest allowed object size for a single part upload, and is the most cost efficient chunk size.
+
+### Running backups automatically
+Feel free to use systemd services or other scheduling tools to call `zfs-incremental-backup init`. Just don't run multiple instances `zfs-incremental-backup init` on the *same save data file* at the same time. You can run multiple `zfs-incremental-backup init` to back up **different** datasets at the same time, but consider that you will probably be limited by upload speed anyways, so it may not save time running them in parallel.
+
+## Set up an AWS bucket 
+
+### Create an AWS account
+
+### Create an S3 bucket
 
 ### Create an AWS IAM user
 - Click "Create user"
@@ -74,17 +93,6 @@ You could use BTRFS or some other fs which can do snapshots, but for now it is m
 - Get the AWS ClI
 - Run `aws configure` and enter the credentials and region. Leave "Default output format" empty
 
-## Future Improvements
-Here are some improvements I can think of:
-- Being able to change the encryption password
-- Supporting other file systems like BTRFS
-- Supporting other backup destinations (especially if there is a lower-priced one)
-
-### Why would these improvements be made?
-- My personal setup changes (maybe I switch to BTRFS or something else other than ZFS)
-- Someone asks for the feature and I feel like helping them (if it's not to hard then sure)
-- Someone makes a PR and I merge the PR (sure I will merge if it's good)
-
 ## Story
 Inspired by [Immich's documentation](https://immich.app/docs/overview/introduction#welcome) including a personal story of why it was created, I will also write my story here.
 
@@ -92,9 +100,6 @@ I was born after my parents (obviously). By the time I took my first picture, my
 
 So I came up with this plan: save the photos on multiple physical disks, and also save it on a cloud service for 100% (yes I'm rounding up) data durability. I found out about ZFS from a [Late Night Linux podcast](https://latenightlinux.com/). I realized that ZFS would be very nice for handling multiple disks and redundancy and self-healing all automatically at the file system level. I researched cloud storage option and found that [AWS S3 Glacier Deep Archive](https://docs.aws.amazon.com/AmazonS3/latest/userguide/glacier-storage-classes.html#GDA) is the cheapest option at $1/TB/mo.
 
-But I needed a way of actually backing up the files (and being able to restore them, maybe even 40 years later, without writing code 40 years later) to AWS. I searched for existing tools, but none of them fit my scenario perfectly (although I don't think my scenario is that uncommon). That is why I made this tool.
-
-## Why Rust
-Do I need to explain? Isn't it obvious?
-
-Personally I just like Rust, it's my favorite language, ever since I read the Rust book in December 2023.
+## Why did I make this and not use one of the bajillion existing tools?
+- Other tools don't really take advantage of ZFS snapshots
+- Some other tools work with cold storage, but they don't have a good method of restoring
